@@ -25,13 +25,17 @@ const App = () => {
     return <Loading />;
   }
 
+  const {origin, search, hash} = window.location;
+  const loco = {origin, search, hash};  // because web programming sucks
+
+
   return (
     <Router history={history}>
       <div id="app" className="d-flex flex-column h-100">
         <NavBar />
         <Container className="flex-grow-1 mt-5">
           <Switch>
-            <Route path="/" exact component={Home} />
+            <Route path="/" exact component={(props)=>new Home({loco, ...props})} />
             <PrivateRoute path="/profile" component={Profile} />
           </Switch>
         </Container>
