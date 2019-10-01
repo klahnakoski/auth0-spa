@@ -8,7 +8,7 @@ class Home extends React.Component{
     constructor(props){
         super(props);
         const {loco} = props;
-        this.state={auth0:null, user:null, loco};
+        this.state={auth0:null, user:null, token: null, loco};
     }
 
     async componentDidMount() {
@@ -35,6 +35,8 @@ class Home extends React.Component{
         if (await auth0.isAuthenticated()){
             const user = await auth0.getUser();
             this.setState({user});
+            const token = await auth0.getTokenSilently();
+            this.setState({token});
         }
     }
 
@@ -48,18 +50,18 @@ class Home extends React.Component{
     };
 
     render(){
-        const {auth0, user} = this.state;
-        if (auth0) {
-            if (!user) {
-                return (
-                    <button onClick={() => this.login()}>LOGIN</button>
-                );
-            } else {
-                return (<div>READY!</div>);
-            }
-        }else{
+        const {auth0, user, token} = this.state;
+        if (!auth0) {
             return (<div>WAIT</div>);
         }
+        if (!user) {
+            return (<button onClick={() => this.login()}>LOGIN</button>);
+        }
+        return <div>
+            {token && (<div>{JSON.stringify(token)}</div>)}
+            {user && (<div>{JSON.stringify(user)}</div>)}
+            {'READY!'}
+        </div>;
     }
 
 }

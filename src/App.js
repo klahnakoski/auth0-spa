@@ -5,8 +5,7 @@ import Home from "./views/Home";
 
 const App = () => {
     const {origin, search, hash} = window.location;
-    const loco = {origin, search, hash};  // because web programming sucks
-
+    const loco = {origin, search, hash};
 
     return (
         <HashRouter>
