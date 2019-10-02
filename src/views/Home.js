@@ -1,7 +1,16 @@
 import React from "react";
 
-import createAuth0Client from "@auth0/auth0-spa-js";
+import createAuth0Client from "../vendor/auth0";
 import OPTIONS from '../auth_config.json';
+import {
+    bufferToBase64UrlEncoded,
+    createRandomString,
+    encodeState,
+    getUniqueScopes,
+    sha256
+} from "../vendor/auth0/utils";
+
+import { Log } from "../vendor/logs"
 
 class Home extends React.Component{
 
@@ -18,9 +27,10 @@ class Home extends React.Component{
             client_id: OPTIONS.clientId || OPTIONS.client_id,
             domain: OPTIONS.domain,
             redirect_uri: loco.origin,
+            scope: 'openid email profile'
             // audience: "5ce5797952ed1e0857fad60f"
         };
-        console.log(JSON.stringify(initOptions));
+        Log.note("initOptions: {{initOptions|json}}", {initOptions});
 
         const auth0 = await createAuth0Client(initOptions);
         this.setState({auth0});
@@ -29,12 +39,13 @@ class Home extends React.Component{
             try {
                 await auth0.handleRedirectCallback();
             }catch(e){
-                console.warn(e);
+                Log.warning("problem with redirect", {cause:e});
                 window.location.assign(loco.origin);
             }
         }
-        if (await auth0.isAuthenticated()){
-            const user = await auth0.getUser();
+
+        const user = await auth0.getUser();
+        if (user){
             this.setState({user});
             const token = await auth0.getTokenSilently();
             this.setState({token});
@@ -53,16 +64,56 @@ class Home extends React.Component{
                 },
 
             );
-            console.log(response);
+            Log.note("{{response}}", {response});
         }
     }
 
-    async login(){
+    async loginWithRedirect(options){
+        const {
+            scope: loginScope,
+            redirect_uri,
+            appState,
+            audience='default',
+            ...loginOptions
+        } = options || {};
         try {
             const {auth0} = this.state;
-            await auth0.loginWithRedirect();
+            const state = encodeState(createRandomString());
+            const nonce= createRandomString();
+            const code_verifier = createRandomString();
+            const code_challenge = bufferToBase64UrlEncoded(await sha256(code_verifier));
+            const { domain, leeway, ...withoutDomain } = auth0.options;
+
+            const combinedScope = getUniqueScopes(
+                auth0.DEFAULT_SCOPE,
+                auth0.options.scope,
+                loginScope
+            );
+
+            const url = auth0._authorizeUrl({
+                ...withoutDomain,
+                ...loginOptions,
+                scope: combinedScope,
+                response_type: 'code',
+                response_mode: 'query',
+                state,
+                nonce,
+                redirect_uri: redirect_uri || auth0.options.redirect_uri,
+                code_challenge,
+                code_challenge_method: 'S256'
+            });
+            auth0.transactionManager.create(state, {
+                nonce,
+                code_verifier,
+                appState,
+                scope: combinedScope,
+                audience
+            });
+            Log.note("GOTO: {{url}}", {url});
+            window.location.assign(url);
+
         } catch (error) {
-            console.error(error);
+            Log.error("Problem with login", error);
         }
     };
 
@@ -72,7 +123,7 @@ class Home extends React.Component{
             return (<div>WAIT</div>);
         }
         if (!user) {
-            return (<button onClick={() => this.login()}>LOGIN</button>);
+            return (<button onClick={() => this.loginWithRedirect()}>LOGIN</button>);
         }
         return <div>
             {token && (<div>{JSON.stringify(token)}</div>)}
