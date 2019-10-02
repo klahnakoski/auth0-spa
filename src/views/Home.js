@@ -17,7 +17,8 @@ class Home extends React.Component{
         const initOptions = {
             client_id: OPTIONS.clientId || OPTIONS.client_id,
             domain: OPTIONS.domain,
-            redirect_uri: loco.origin
+            redirect_uri: loco.origin,
+            audience: "5ce5797952ed1e0857fad60f"
         };
         console.log(JSON.stringify(initOptions));
 
@@ -37,6 +38,22 @@ class Home extends React.Component{
             this.setState({user});
             const token = await auth0.getTokenSilently();
             this.setState({token});
+
+            // window.location.assign(loco.origin);
+            const response = await fetch(
+                "http://localhost:5000/api/private",
+                {
+                    method: 'POST',
+                    headers: new Headers({
+                        Accept: 'application/json',
+                        Authorization: "Bearer " + token
+                    }),
+                    referer: "",
+                    body: "{}"
+                },
+
+            );
+            console.log(response);
         }
     }
 
