@@ -18,7 +18,7 @@ class Home extends React.Component{
             client_id: OPTIONS.clientId || OPTIONS.client_id,
             domain: OPTIONS.domain,
             redirect_uri: loco.origin,
-            audience: "5ce5797952ed1e0857fad60f"
+            // audience: "5ce5797952ed1e0857fad60f"
         };
         console.log(JSON.stringify(initOptions));
 
