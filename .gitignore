@@ -6,3 +6,4 @@
 *.iml
 /node_modules
 /build
+/*.log
