@@ -152,6 +152,7 @@ export default class Auth0Client {
       const url = this._authorizeUrl({
         ...withoutDomain,
         ...loginOptions,
+        audience,
         scope: combinedScope,
         response_type: 'code',
         response_mode: 'query',

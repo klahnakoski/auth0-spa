@@ -1,4 +1,5 @@
 import { DEFAULT_AUTHORIZE_TIMEOUT_IN_SECONDS } from './constants';
+import {Log} from '../logs';
 
 const dedupe = arr => arr.filter((x, i) => arr.indexOf(x) === i);
 
@@ -163,15 +164,18 @@ const getJSON = async (url, options) => {
   return success;
 };
 
-export const oauthToken = async ({ baseUrl, ...options }) =>
-  await getJSON(`${baseUrl}/oauth/token`, {
+export const oauthToken = async ({ baseUrl, ...options }) => {
+  const body = {
+    grant_type: 'authorization_code',
+    redirect_uri: window.location.origin,
+    ...options
+  };
+  Log.note("post to /oath/token  {{body|json}}", {body});
+  return getJSON(`${baseUrl}/oauth/token`, {
     method: 'POST',
-    body: JSON.stringify({
-      grant_type: 'authorization_code',
-      redirect_uri: window.location.origin,
-      ...options
-    }),
+    body: JSON.stringify(body),
     headers: {
       'Content-type': 'application/json'
     }
   });
+};

@@ -75,7 +75,7 @@ class Home extends React.Component{
             return (<div>WAIT</div>);
         }
         if (!user) {
-            return (<button onClick={() => auth0.loginWithRedirect()}>LOGIN</button>);
+            return (<button onClick={() => auth0.loginWithRedirect({audience:"https://locahost/query"})}>LOGIN</button>);
         }
         return <div>
             {token && (<div>{JSON.stringify(token)}</div>)}
