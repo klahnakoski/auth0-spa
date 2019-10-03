@@ -1,32 +1,65 @@
 import {
-  getUniqueScopes,
-  createQueryParams,
-  runPopup,
-  parseQueryResult,
-  encodeState,
-  createRandomString,
-  runIframe,
-  sha256,
   bufferToBase64UrlEncoded,
+  createQueryParams,
+  createRandomString,
+  encodeState,
+  unionScopes,
   oauthToken,
-  openPopup
+  parseQueryResult,
+  runIframe,
+  sha256
 } from './utils';
 
 import Cache from './cache';
 import TransactionManager from './transaction-manager';
-import { verify as verifyIdToken } from './jwt';
-import { AuthenticationError } from './errors';
+import {verify as verifyIdToken} from './jwt';
 import * as ClientStorage from './storage';
-import { DEFAULT_POPUP_CONFIG_OPTIONS, telemetry } from './constants';
-import { URL } from '../requests';
+import {DEFAULT_POPUP_CONFIG_OPTIONS, telemetry} from './constants';
+import {URL} from '../requests';
 import {Log} from "../logs";
+
+
+async function createAuth0Client(options) {
+  if (!window.crypto && (window).msCrypto) {
+    (window).crypto = (window).msCrypto;
+  }
+  if (!window.crypto) {
+    throw new Error(
+        'For security reasons, `window.crypto` is required to run `auth0-spa-js`.'
+    );
+  }
+  if (typeof window.crypto.subtle === 'undefined') {
+    throw new Error(`
+      auth0-spa-js must run on a secure origin.
+      See https://github.com/auth0/auth0-spa-js/blob/master/FAQ.md#why-do-i-get-error-invalid-state-in-firefox-when-refreshing-the-page-immediately-after-a-login 
+      for more information.
+    `);
+  }
+
+  const auth0 = new Auth0Client(options);
+
+  if (!ClientStorage.get('auth0.is.authenticated')) {
+    return auth0;
+  }
+  try {
+    await auth0.getTokenSilently({
+      audience: options.audience,
+      scope: options.scope,
+      ignoreCache: true
+    });
+  } catch (error) {
+    // ignore
+  }
+  return auth0;
+}
+
 
 
 
 /**
  * Auth0 SDK for Single Page Applications using [Authorization Code Grant Flow with PKCE](https://auth0.com/docs/api-auth/tutorials/authorization-code-grant-pkce).
  */
-export default class Auth0Client {
+class Auth0Client {
   DEFAULT_SCOPE = 'openid profile email';
 
   constructor(options) {
@@ -46,7 +79,7 @@ export default class Auth0Client {
     return {
       ...withoutDomain,
       ...authorizeOptions,
-      scope: getUniqueScopes(
+      scope: unionScopes(
         this.DEFAULT_SCOPE,
         this.options.scope,
         authorizeOptions.scope
@@ -86,14 +119,10 @@ export default class Auth0Client {
    *
    * @param options
    */
-  async getUser(
-    options = {
-      audience: this.options.audience || 'default',
-      scope: this.options.scope || this.DEFAULT_SCOPE
-    }
-  ) {
-    options.scope = getUniqueScopes(this.DEFAULT_SCOPE, options.scope);
-    const cache = this.cache.get(options);
+  async getUser(options={}){
+    const {audience, scope: requestScope} = options;
+    const scope = unionScopes(this.DEFAULT_SCOPE, requestScope);
+    const cache = this.cache.get({audience, scope});
     return cache && cache.decodedToken.user;
   }
 
@@ -112,7 +141,7 @@ export default class Auth0Client {
       scope: this.options.scope || this.DEFAULT_SCOPE
     }
   ) {
-    options.scope = getUniqueScopes(this.DEFAULT_SCOPE, options.scope);
+    options.scope = unionScopes(this.DEFAULT_SCOPE, options.scope);
     const cache = this.cache.get(options);
     return cache && cache.decodedToken.claims;
   }
@@ -134,8 +163,7 @@ export default class Auth0Client {
         scope: loginScope,
         redirect_uri,
         appState,
-        audience='default',
-        ...loginOptions
+        ...loginOptions  // do not use audience
       } = options;
       const state = encodeState(createRandomString());
       const nonce= createRandomString();
@@ -143,7 +171,7 @@ export default class Auth0Client {
       const code_challenge = bufferToBase64UrlEncoded(await sha256(code_verifier));
       const { domain, leeway, ...withoutDomain } = this.options;
 
-      const combinedScope = getUniqueScopes(
+      const combinedScope = unionScopes(
           this.DEFAULT_SCOPE,
           this.options.scope,
           loginScope
@@ -152,7 +180,6 @@ export default class Auth0Client {
       const url = this._authorizeUrl({
         ...withoutDomain,
         ...loginOptions,
-        audience,
         scope: combinedScope,
         response_type: 'code',
         response_mode: 'query',
@@ -166,8 +193,7 @@ export default class Auth0Client {
         nonce,
         code_verifier,
         appState,
-        scope: combinedScope,
-        audience
+        scope: combinedScope
       });
       Log.note("GOTO: {{url}}", {url});
       window.location.assign(url);
@@ -194,7 +220,7 @@ export default class Auth0Client {
     );
 
     if (error) {
-      throw new AuthenticationError(error, error_description, state);
+      Log.error("problem with callback {{detail|json}}", {detail: {error, error_description, state}});
     }
 
     const transaction = this.transactionManager.get(state);
@@ -248,7 +274,7 @@ export default class Auth0Client {
       ignoreCache: false
     }
   ) {
-    options.scope = getUniqueScopes(this.DEFAULT_SCOPE, options.scope);
+    options.scope = unionScopes(this.DEFAULT_SCOPE, options.scope);
     if (!options.ignoreCache) {
       const cache = this.cache.get({
         scope: options.scope,
@@ -321,7 +347,7 @@ export default class Auth0Client {
     },
     config = DEFAULT_POPUP_CONFIG_OPTIONS
   ) {
-    options.scope = getUniqueScopes(
+    options.scope = unionScopes(
       this.DEFAULT_SCOPE,
       this.options.scope,
       options.scope
@@ -360,3 +386,5 @@ export default class Auth0Client {
     window.location.assign(`${url}${federatedQuery}`);
   }
 }
+
+export { createAuth0Client, Auth0Client}
