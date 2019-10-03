@@ -371,15 +371,14 @@ class Auth0Client {
    * @param options
    */
   logout(options = {}) {
-    const {federated, client_id: requestClientID, ...more} = options;
-    if (!Data.isEmpty(more)){
-      Log.error("not expecting parameters {{more|json}}", {more})
-    }
-    const client_id = coalesce(requestClientID,  this.options.client_id);
     ClientStorage.remove('auth0.is.authenticated');
     const url = URL({
       path: this.domainUrl + "/v2/logout",
-      query: {federated, client_id, telemetry}
+      query: {
+        ...options,
+        client_id: coalesce(options.client_id,  this.options.client_id),
+        telemetry
+      }
     });
     window.location.assign(url);
   }
