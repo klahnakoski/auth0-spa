@@ -1,13 +1,12 @@
 import {
   bufferToBase64UrlEncoded,
-  createQueryParams,
   createRandomString,
   encodeState,
-  unionScopes,
   oauthToken,
   parseQueryResult,
   runIframe,
-  sha256
+  sha256,
+  unionScopes
 } from './utils';
 
 import Cache from './cache';
@@ -17,7 +16,8 @@ import * as ClientStorage from './storage';
 import {DEFAULT_POPUP_CONFIG_OPTIONS, telemetry} from './constants';
 import {URL} from '../requests';
 import {Log} from "../logs";
-
+import {coalesce} from "../utils";
+import {Data} from "../datas";
 
 async function createAuth0Client(options) {
   if (!window.crypto && (window).msCrypto) {
@@ -371,19 +371,17 @@ class Auth0Client {
    * @param options
    */
   logout(options = {}) {
-    if (options.client_id !== null) {
-      options.client_id = options.client_id || this.options.client_id;
-    } else {
-      delete options.client_id;
+    const {federated, client_id: requestClientID, ...more} = options;
+    if (!Data.isEmpty(more)){
+      Log.error("not expecting parameters {{more|json}}", {more})
     }
+    const client_id = coalesce(requestClientID,  this.options.client_id);
     ClientStorage.remove('auth0.is.authenticated');
-    const { federated, ...logoutOptions } = options;
-    const federatedQuery = federated ? `&federated` : '';
     const url = URL({
       path: this.domainUrl + "/v2/logout",
-      query: {...createQueryParams(logoutOptions), telemetry}
+      query: {federated, client_id, telemetry}
     });
-    window.location.assign(`${url}${federatedQuery}`);
+    window.location.assign(url);
   }
 }
 

@@ -87,8 +87,9 @@ class Home extends React.Component {
             return (<button onClick={() => auth0.loginWithRedirect()}>LOGIN</button>);
         }
         return <div>
-            {token && (<div>{value2json(token)}</div>)}
-            {user && (<div>{value2json(user)}</div>)}
+            <button onClick={() => auth0.logout()}>LOGOUT</button>
+            {token && (<pre>{value2json(token)}</pre>)}
+            {user && (<pre>{value2json(user)}</pre>)}
             READY!
         </div>;
     }
