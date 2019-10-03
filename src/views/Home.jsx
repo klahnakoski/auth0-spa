@@ -1,34 +1,41 @@
 import React from "react";
 
-import createAuth0Client from "../vendor/auth0";
+import {Log} from "../vendor/logs";
+import {value2json} from "../vendor/convert";
+import {fromQueryString} from "../vendor/requests";
+import {createAuth0Client} from "../vendor/auth0/Auth0Client";
 import OPTIONS from '../auth_config.json';
-import {
-    bufferToBase64UrlEncoded,
-    createRandomString,
-    encodeState,
-    getUniqueScopes,
-    sha256
-} from "../vendor/auth0/utils";
 
-import { Log } from "../vendor/logs"
 
-class Home extends React.Component{
+class Home extends React.Component {
 
-    constructor(props){
+    constructor(props) {
         super(props);
         const {loco} = props;
-        this.state={auth0:null, user:null, token: null, loco};
+        this.state = {
+            auth0: null,
+            user: null,
+            token: null,
+            loco,
+            error: null
+        };
     }
 
     async componentDidMount() {
         const {loco} = this.state;
 
+        if (loco.search.includes("error=")){
+            const details = fromQueryString(loco.search);
+            this.setState({error: details});
+            Log.warning("problem with call {{details|json}}", {details});
+            return
+        }
+
         const initOptions = {
             client_id: OPTIONS.clientId || OPTIONS.client_id,
             domain: OPTIONS.domain,
             redirect_uri: loco.origin,
-            scope: 'openid email profile'
-            // audience: "5ce5797952ed1e0857fad60f"
+            scope: 'openid email profile',
         };
         Log.note("initOptions: {{initOptions|json}}", {initOptions});
 
@@ -38,14 +45,14 @@ class Home extends React.Component{
         if (loco.search.includes("code=")) {
             try {
                 await auth0.handleRedirectCallback();
-            }catch(e){
-                Log.warning("problem with redirect", {cause:e});
+            } catch (e) {
+                Log.warning("problem with redirect", {cause: e});
                 window.location.assign(loco.origin);
             }
         }
 
         const user = await auth0.getUser();
-        if (user){
+        if (user) {
             this.setState({user});
             const token = await auth0.getTokenSilently();
             this.setState({token});
@@ -62,25 +69,27 @@ class Home extends React.Component{
                     referer: "",
                     body: "{}"
                 },
-
             );
             Log.note("{{response}}", {response});
         }
     }
 
 
-    render(){
-        const {auth0, user, token} = this.state;
+    render() {
+        const {auth0, user, token, error} = this.state;
+        if (error){
+            return (<pre>{value2json(error)}</pre>);
+        }
         if (!auth0) {
             return (<div>WAIT</div>);
         }
         if (!user) {
-            return (<button onClick={() => auth0.loginWithRedirect({audience:"https://locahost/query"})}>LOGIN</button>);
+            return (<button onClick={() => auth0.loginWithRedirect()}>LOGIN</button>);
         }
         return <div>
-            {token && (<div>{JSON.stringify(token)}</div>)}
-            {user && (<div>{JSON.stringify(user)}</div>)}
-            {'READY!'}
+            {token && (<div>{value2json(token)}</div>)}
+            {user && (<div>{value2json(user)}</div>)}
+            READY!
         </div>;
     }
 
