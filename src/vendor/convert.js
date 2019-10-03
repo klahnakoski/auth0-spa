@@ -1,7 +1,7 @@
-import { length, selectFrom, toPairs } from './vectors';
-import { Log } from './logs';
-import { isData } from './datas';
-import { isArray, isFunction } from './utils';
+import {length, selectFrom, toPairs} from './vectors';
+import {Log} from './logs';
+import {isData} from './datas';
+import {isArray, isFunction} from './utils';
 import strings from './strings';
 
 function json2value(json) {

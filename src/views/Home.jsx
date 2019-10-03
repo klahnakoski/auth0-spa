@@ -54,23 +54,28 @@ class Home extends React.Component {
         const user = await auth0.getUser();
         if (user) {
             this.setState({user});
-            const token = await auth0.getTokenSilently();
-            this.setState({token});
+            try {
+                const token = await auth0.getTokenSilently();
+                this.setState({token});
 
-            // window.location.assign(loco.origin);
-            const response = await fetch(
-                "http://localhost:5000/api/private",
-                {
-                    method: 'POST',
-                    headers: new Headers({
-                        Accept: 'application/json',
-                        Authorization: "Bearer " + token
-                    }),
-                    referer: "",
-                    body: "{}"
-                },
-            );
-            Log.note("{{response}}", {response});
+                // window.location.assign(loco.origin);
+                const response = await fetch(
+                    "http://localhost:5000/api/private",
+                    {
+                        method: 'POST',
+                        headers: new Headers({
+                            Accept: 'application/json',
+                            Authorization: "Bearer " + token
+                        }),
+                        referer: "",
+                        body: "{}"
+                    },
+                );
+                Log.note("API {{response}}", {response});
+            } catch (error) {
+                this.setState({error});
+                Log.warning("problem with getting token", error);
+            }
         }
     }
 

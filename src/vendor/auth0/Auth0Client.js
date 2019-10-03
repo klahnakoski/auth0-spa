@@ -17,7 +17,6 @@ import {DEFAULT_POPUP_CONFIG_OPTIONS, telemetry} from './constants';
 import {URL} from '../requests';
 import {Log} from "../logs";
 import {coalesce} from "../utils";
-import {Data} from "../datas";
 
 async function createAuth0Client(options) {
   if (!window.crypto && (window).msCrypto) {
@@ -48,7 +47,7 @@ async function createAuth0Client(options) {
       ignoreCache: true
     });
   } catch (error) {
-    // ignore
+    Log.warning("get token did not work", error);
   }
   return auth0;
 }
@@ -67,31 +66,6 @@ class Auth0Client {
     this.cache = new Cache();
     this.transactionManager = new TransactionManager();
     this.domainUrl = `https://${this.options.domain}`;
-  }
-  _getParams(
-    authorizeOptions,
-    state,
-    nonce,
-    code_challenge,
-    redirect_uri
-  ) {
-    const { domain, leeway, ...withoutDomain } = this.options;
-    return {
-      ...withoutDomain,
-      ...authorizeOptions,
-      scope: unionScopes(
-        this.DEFAULT_SCOPE,
-        this.options.scope,
-        authorizeOptions.scope
-      ),
-      response_type: 'code',
-      response_mode: 'query',
-      state,
-      nonce,
-      redirect_uri: redirect_uri || this.options.redirect_uri,
-      code_challenge,
-      code_challenge_method: 'S256'
-    };
   }
   _authorizeUrl(authorizeOptions) {
     return URL({
@@ -120,9 +94,9 @@ class Auth0Client {
    * @param options
    */
   async getUser(options={}){
-    const {audience, scope: requestScope} = options;
-    const scope = unionScopes(this.DEFAULT_SCOPE, requestScope);
-    const cache = this.cache.get({audience, scope});
+    options.audience = coalesce(options.audience, this.options.audience);
+    options.scope = unionScopes(this.DEFAULT_SCOPE, options.scope, this.options.scope);
+    const cache = this.cache.get(options);
     return cache && cache.decodedToken.user;
   }
 
@@ -135,13 +109,9 @@ class Auth0Client {
    *
    * @param options
    */
-  async getIdTokenClaims(
-    options = {
-      audience: this.options.audience || 'default',
-      scope: this.options.scope || this.DEFAULT_SCOPE
-    }
-  ) {
-    options.scope = unionScopes(this.DEFAULT_SCOPE, options.scope);
+  async getIdTokenClaims(options={}) {
+    options.audience = coalesce(options.audience, this.options.audience);
+    options.scope = unionScopes(this.DEFAULT_SCOPE, options.scope, this.options.scope);
     const cache = this.cache.get(options);
     return cache && cache.decodedToken.claims;
   }
@@ -171,16 +141,12 @@ class Auth0Client {
       const code_challenge = bufferToBase64UrlEncoded(await sha256(code_verifier));
       const { domain, leeway, ...withoutDomain } = this.options;
 
-      const combinedScope = unionScopes(
-          this.DEFAULT_SCOPE,
-          this.options.scope,
-          loginScope
-      );
+      const scope = unionScopes(this.DEFAULT_SCOPE, this.options.scope, loginScope);
 
       const url = this._authorizeUrl({
         ...withoutDomain,
         ...loginOptions,
-        scope: combinedScope,
+        scope,
         response_type: 'code',
         response_mode: 'query',
         state,
@@ -193,7 +159,7 @@ class Auth0Client {
         nonce,
         code_verifier,
         appState,
-        scope: combinedScope
+        scope,
       });
       Log.note("GOTO: {{url}}", {url});
       window.location.assign(url);
@@ -244,7 +210,7 @@ class Auth0Client {
     const cacheEntry = {
       ...authResult,
       decodedToken,
-      audience: transaction.audience,
+      audience: coalesce(transaction.audience),
       scope: transaction.scope
     };
     this.cache.save(cacheEntry);
@@ -267,62 +233,55 @@ class Auth0Client {
    *
    * @param options
    */
-  async getTokenSilently(
-    options = {
-      audience: this.options.audience,
-      scope: this.options.scope || this.DEFAULT_SCOPE,
-      ignoreCache: false
-    }
-  ) {
-    options.scope = unionScopes(this.DEFAULT_SCOPE, options.scope);
+  async getTokenSilently(options = {}) {
+    const {audience: requestAudience, scope: requestScope, redirect_uri: requestRedirect, ignoreCache = false} = options;
+    const { domain, leeway, client_id, audience: authAudience, scope: authScope, redirect_uri: authRedirect, ...withoutDomain } = this.options;
+    const audience = coalesce(requestAudience, authAudience);
+    const scope = unionScopes(requestScope, authScope, this.DEFAULT_SCOPE);
+    const redirect_uri = coalesce(requestRedirect, authRedirect, window.location.origin);
     if (!options.ignoreCache) {
-      const cache = this.cache.get({
-        scope: options.scope,
-        audience: options.audience || 'default'
-      });
-      if (cache) {
-        return cache.access_token;
-      }
+      const cache = this.cache.get({scope, audience});
+      if (cache) return cache.access_token;
     }
-    const stateIn = encodeState(createRandomString());
-    const nonceIn = createRandomString();
+
+    const state = encodeState(createRandomString());
+    const nonce = createRandomString();
     const code_verifier = createRandomString();
     const code_challengeBuffer = await sha256(code_verifier);
     const code_challenge = bufferToBase64UrlEncoded(code_challengeBuffer);
-    const authorizeOptions = {
-      audience: options.audience,
-      scope: options.scope
-    };
-    const params = this._getParams(
-      authorizeOptions,
-      stateIn,
-      nonceIn,
-      code_challenge,
-      this.options.redirect_uri || window.location.origin
-    );
+
     const url = this._authorizeUrl({
-      ...params,
+      ...withoutDomain,
+      client_id,
+      audience,
+      scope,
+      response_type: 'code',
+      state,
+      nonce,
+      redirect_uri,
+      code_challenge,
+      code_challenge_method: 'S256',
       prompt: 'none',
-      response_mode: 'web_message'
+      response_mode: 'web_message',
     });
 
     const codeResult = await runIframe(url, this.domainUrl);
-    if (stateIn !== codeResult.state) {
+    if (state !== codeResult.state) {
       throw new Error('Invalid state');
     }
     const authResult = await oauthToken({
       baseUrl: this.domainUrl,
-      audience: options.audience || this.options.audience,
-      client_id: this.options.client_id,
+      audience,
+      client_id,
       code_verifier,
       code: codeResult.code
     });
-    const decodedToken = this._verifyIdToken(authResult.id_token, nonceIn);
+    const decodedToken = this._verifyIdToken(authResult.id_token, nonce);
     const cacheEntry = {
       ...authResult,
       decodedToken,
-      scope: params.scope,
-      audience: params.audience || 'default'
+      scope,
+      audience
     };
     this.cache.save(cacheEntry);
     ClientStorage.save('auth0.is.authenticated', true, { daysUntilExpire: 1 });
@@ -339,24 +298,13 @@ class Auth0Client {
    * results will be valid according to their expiration times.
    *
    * @param options
+   * @param config
    */
-  async getTokenWithPopup(
-    options = {
-      audience: this.options.audience,
-      scope: this.options.scope || this.DEFAULT_SCOPE
-    },
-    config = DEFAULT_POPUP_CONFIG_OPTIONS
-  ) {
-    options.scope = unionScopes(
-      this.DEFAULT_SCOPE,
-      this.options.scope,
-      options.scope
-    );
+  async getTokenWithPopup(options = {}, config = DEFAULT_POPUP_CONFIG_OPTIONS) {
+    options.scope = unionScopes(this.DEFAULT_SCOPE, this.options.scope, options.scope);
+    options.audience = coalesce(options.audience, this.options.audience);
     await this.loginWithPopup(options, config);
-    const cache = this.cache.get({
-      scope: options.scope,
-      audience: options.audience || 'default'
-    });
+    const cache = this.cache.get(options);
     return cache.access_token;
   }
 
