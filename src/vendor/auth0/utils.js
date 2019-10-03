@@ -1,15 +1,19 @@
 import { DEFAULT_AUTHORIZE_TIMEOUT_IN_SECONDS } from './constants';
 import {Log} from '../logs';
+import {selectFrom} from "../vectors";
+import {exists} from "../utils";
 
-const dedupe = arr => arr.filter((x, i) => arr.indexOf(x) === i);
 
 const TIMEOUT_ERROR = { error: 'timeout', error_description: 'Timeout' };
-export const getUniqueScopes = (...scopes) => {
-  const scopeString = scopes.filter(Boolean).join();
-  return dedupe(scopeString.replace(/\s/g, ',').split(','))
+export const unionScopes = (...scopes) => selectFrom(scopes)
+    .filter(exists)
+    .map(x => x.split(' '))
+    .flatten()
+    .filter(exists)
+    .union()
+    .sort()
     .join(' ')
-    .trim();
-};
+;
 
 export const parseQueryResult = (queryString) => {
   let queryParams = queryString.split('&');
