@@ -68,54 +68,6 @@ class Home extends React.Component{
         }
     }
 
-    async loginWithRedirect(options){
-        const {
-            scope: loginScope,
-            redirect_uri,
-            appState,
-            audience='default',
-            ...loginOptions
-        } = options || {};
-        try {
-            const {auth0} = this.state;
-            const state = encodeState(createRandomString());
-            const nonce= createRandomString();
-            const code_verifier = createRandomString();
-            const code_challenge = bufferToBase64UrlEncoded(await sha256(code_verifier));
-            const { domain, leeway, ...withoutDomain } = auth0.options;
-
-            const combinedScope = getUniqueScopes(
-                auth0.DEFAULT_SCOPE,
-                auth0.options.scope,
-                loginScope
-            );
-
-            const url = auth0._authorizeUrl({
-                ...withoutDomain,
-                ...loginOptions,
-                scope: combinedScope,
-                response_type: 'code',
-                response_mode: 'query',
-                state,
-                nonce,
-                redirect_uri: redirect_uri || auth0.options.redirect_uri,
-                code_challenge,
-                code_challenge_method: 'S256'
-            });
-            auth0.transactionManager.create(state, {
-                nonce,
-                code_verifier,
-                appState,
-                scope: combinedScope,
-                audience
-            });
-            Log.note("GOTO: {{url}}", {url});
-            window.location.assign(url);
-
-        } catch (error) {
-            Log.error("Problem with login", error);
-        }
-    };
 
     render(){
         const {auth0, user, token} = this.state;
@@ -123,7 +75,7 @@ class Home extends React.Component{
             return (<div>WAIT</div>);
         }
         if (!user) {
-            return (<button onClick={() => this.loginWithRedirect()}>LOGIN</button>);
+            return (<button onClick={() => auth0.loginWithRedirect()}>LOGIN</button>);
         }
         return <div>
             {token && (<div>{JSON.stringify(token)}</div>)}

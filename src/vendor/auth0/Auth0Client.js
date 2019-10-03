@@ -19,6 +19,7 @@ import { AuthenticationError } from './errors';
 import * as ClientStorage from './storage';
 import { DEFAULT_POPUP_CONFIG_OPTIONS, telemetry } from './constants';
 import { URL } from '../requests';
+import {Log} from "../logs";
 
 
 
@@ -77,66 +78,6 @@ export default class Auth0Client {
 
   /**
    * ```js
-   * await auth0.loginWithPopup(options);
-   * ```
-   *
-   * Opens a popup with the `/authorize` URL using the parameters
-   * provided as arguments. Random and secure `state` and `nonce`
-   * parameters will be auto-generated. If the response is successful,
-   * results will be valid according to their expiration times.
-   *
-   * IMPORTANT: This method has to be called from an event handler
-   * that was started by the user like a button click, for example,
-   * otherwise the popup will be blocked in most browsers.
-   *
-   * @param options
-   */
-  async loginWithPopup(
-    options = {},
-    config = DEFAULT_POPUP_CONFIG_OPTIONS
-  ) {
-    const popup = await openPopup();
-    const { ...authorizeOptions } = options;
-    const stateIn = encodeState(createRandomString());
-    const nonceIn = createRandomString();
-    const code_verifier = createRandomString();
-    const code_challengeBuffer = await sha256(code_verifier);
-    const code_challenge = bufferToBase64UrlEncoded(code_challengeBuffer);
-    const params = this._getParams(
-      authorizeOptions,
-      stateIn,
-      nonceIn,
-      code_challenge,
-      this.options.redirect_uri || window.location.origin
-    );
-    const url = this._authorizeUrl({
-      ...params,
-      response_mode: 'web_message'
-    });
-    const codeResult = await runPopup(popup, url, config);
-    if (stateIn !== codeResult.state) {
-      throw new Error('Invalid state');
-    }
-    const authResult = await oauthToken({
-      baseUrl: this.domainUrl,
-      audience: options.audience || this.options.audience,
-      client_id: this.options.client_id,
-      code_verifier,
-      code: codeResult.code
-    });
-    const decodedToken = this._verifyIdToken(authResult.id_token, nonceIn);
-    const cacheEntry = {
-      ...authResult,
-      decodedToken,
-      scope: params.scope,
-      audience: params.audience || 'default'
-    };
-    this.cache.save(cacheEntry);
-    ClientStorage.save('auth0.is.authenticated', true, { daysUntilExpire: 1 });
-  }
-
-  /**
-   * ```js
    * const user = await auth0.getUser();
    * ```
    *
@@ -187,30 +128,53 @@ export default class Auth0Client {
    *
    * @param options
    */
-  async loginWithRedirect(options = {}) {
-    const { redirect_uri, appState, ...authorizeOptions } = options;
-    const stateIn = encodeState(createRandomString());
-    const nonceIn = createRandomString();
-    const code_verifier = createRandomString();
-    const code_challengeBuffer = await sha256(code_verifier);
-    const code_challenge = bufferToBase64UrlEncoded(code_challengeBuffer);
-    const params = this._getParams(
-      authorizeOptions,
-      stateIn,
-      nonceIn,
-      code_challenge,
-      redirect_uri
-    );
-    const url = this._authorizeUrl(params);
-    this.transactionManager.create(stateIn, {
-      nonce: nonceIn,
-      code_verifier,
-      appState,
-      scope: params.scope,
-      audience: params.audience || 'default'
-    });
-    window.location.assign(url);
-  }
+  async loginWithRedirect(options={}){
+    try {
+      const {
+        scope: loginScope,
+        redirect_uri,
+        appState,
+        audience='default',
+        ...loginOptions
+      } = options;
+      const state = encodeState(createRandomString());
+      const nonce= createRandomString();
+      const code_verifier = createRandomString();
+      const code_challenge = bufferToBase64UrlEncoded(await sha256(code_verifier));
+      const { domain, leeway, ...withoutDomain } = this.options;
+
+      const combinedScope = getUniqueScopes(
+          this.DEFAULT_SCOPE,
+          this.options.scope,
+          loginScope
+      );
+
+      const url = this._authorizeUrl({
+        ...withoutDomain,
+        ...loginOptions,
+        scope: combinedScope,
+        response_type: 'code',
+        response_mode: 'query',
+        state,
+        nonce,
+        redirect_uri: redirect_uri || this.options.redirect_uri,
+        code_challenge,
+        code_challenge_method: 'S256'
+      });
+      this.transactionManager.create(state, {
+        nonce,
+        code_verifier,
+        appState,
+        scope: combinedScope,
+        audience
+      });
+      Log.note("GOTO: {{url}}", {url});
+      window.location.assign(url);
+
+    } catch (error) {
+      Log.error("Problem with login", error);
+    }
+  };
 
   /**
    * After the browser redirects back to the callback page,
