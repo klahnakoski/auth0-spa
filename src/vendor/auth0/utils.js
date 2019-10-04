@@ -94,7 +94,7 @@ export const runPopup = (
 
 export const createRandomString = () => {
   const charset =
-    '0123456789ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvwxyz-_~.';
+    '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_';
   let random = '';
   const randomValues = Array.from(crypto.getRandomValues(new Uint8Array(43)));
   randomValues.forEach(v => (random += charset[v % charset.length]));
@@ -154,32 +154,3 @@ export const bufferToBase64UrlEncoded = input => {
   );
 };
 
-const getJSON = async (url, options) => {
-  const response = await fetch(url, options);
-  const { error, error_description, ...success } = await response.json();
-  if (!response.ok) {
-    const errorMessage =
-      error_description || `HTTP error. Unable to fetch ${url}`;
-    const e = new Error(errorMessage);
-    e.error = error || 'request_error';
-    e.error_description = errorMessage;
-    throw e;
-  }
-  return success;
-};
-
-export const oauthToken = async ({ baseUrl, ...options }) => {
-  const body = {
-    grant_type: 'authorization_code',
-    redirect_uri: window.location.origin,
-    ...options
-  };
-  Log.note("post to /oath/token  {{body|json}}", {body});
-  return getJSON(`${baseUrl}/oauth/token`, {
-    method: 'POST',
-    body: JSON.stringify(body),
-    headers: {
-      'Content-type': 'application/json'
-    }
-  });
-};

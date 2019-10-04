@@ -81,7 +81,7 @@ const fetchJson = async (url, options = {}) => {
     ? null
     : Date.now().add(Duration.newInstance(expire));
 
-  if (expire) {
+  if (expire && !options.body) {
     const oldData = await requestCache.get(url);
 
     (async () => {
@@ -89,7 +89,7 @@ const fetchJson = async (url, options = {}) => {
       try {
         await sleep(10000); // wait 10sec so others can make requests
         Log.note('refesh cache for {{url}}', { url });
-        const response = await fetch(url, jsonHeaders);
+        const response = await fetch(url, {...options, headers: {...options.headers, ...jsonHeaders}});
 
         if (!response || !response.ok) {
           await requestCache.set(url, null);
@@ -109,7 +109,7 @@ const fetchJson = async (url, options = {}) => {
   }
 
   try {
-    const response = await fetch(url, jsonHeaders);
+    const response = await fetch(url, {...options, headers: {...options.headers, ...jsonHeaders}});
 
     if (!response) {
       return null;

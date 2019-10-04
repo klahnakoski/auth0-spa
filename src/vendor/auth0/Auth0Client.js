@@ -2,7 +2,6 @@ import {
   bufferToBase64UrlEncoded,
   createRandomString,
   encodeState,
-  oauthToken,
   parseQueryResult,
   runIframe,
   sha256,
@@ -14,9 +13,11 @@ import TransactionManager from './transaction-manager';
 import {verify as verifyIdToken} from './jwt';
 import * as ClientStorage from './storage';
 import {DEFAULT_POPUP_CONFIG_OPTIONS, telemetry} from './constants';
-import {URL} from '../requests';
+import {fetchJson, URL} from '../requests';
 import {Log} from "../logs";
-import {coalesce} from "../utils";
+import {coalesce, exists} from "../utils";
+import {value2json} from "../convert";
+import {toPairs} from "../vectors";
 
 async function createAuth0Client(options) {
   if (!window.crypto && (window).msCrypto) {
@@ -83,6 +84,24 @@ class Auth0Client {
     });
   }
 
+
+  oauthToken = async (options) => {
+    const body = {
+      ...toPairs(options).filter(exists).fromPairs(),
+      grant_type: 'authorization_code'
+    };
+    Log.note("post to /oath/token  {{body|json}}", {body});
+
+    return fetchJson(
+        `${this.domainUrl}/oauth/token`,
+        {
+          method: 'POST',
+          headers: {"Content-type": "application/json"},
+          body: JSON.stringify(body)
+        }
+    );
+
+  };
   /**
    * ```js
    * const user = await auth0.getUser();
@@ -195,11 +214,11 @@ class Auth0Client {
     }
     this.transactionManager.remove(state);
 
-    const authResult = await oauthToken({
-      baseUrl: this.domainUrl,
-      audience: this.options.audience,
+    const authResult = await this.oauthToken({
+      audience: coalesce(this.options.audience),
       client_id: this.options.client_id,
       code_verifier: transaction.code_verifier,
+      redirect_uri: coalesce(this.options.redirect_uri, window.location.origin),
       code
     });
 
@@ -269,11 +288,11 @@ class Auth0Client {
     if (state !== codeResult.state) {
       throw new Error('Invalid state');
     }
-    const authResult = await oauthToken({
-      baseUrl: this.domainUrl,
+    const authResult = await this.oauthToken({
       audience,
       client_id,
       code_verifier,
+      redirect_uri,
       code: codeResult.code
     });
     const decodedToken = this._verifyIdToken(authResult.id_token, nonce);
