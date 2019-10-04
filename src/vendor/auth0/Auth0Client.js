@@ -1,7 +1,6 @@
 import {createRandomString, runIframe, sha256, unionScopes} from './utils';
 import TransactionManager from './transaction-manager';
 import {verify as verifyIdToken} from './jwt';
-import {telemetry} from './constants';
 import {fetchJson, fromQueryString, URL} from '../requests';
 import {Log} from "../logs";
 import {exists} from "../utils";
@@ -38,7 +37,7 @@ class Auth0Client {
    */
   async authorizeWithRedirect(){
     try {
-      const { client_id, audience, scope, redirect_uri} = this.options;
+      const { client_id, audience, scope, redirect_uri, telemetry} = this.options;
 
       const state = createRandomString();
       const nonce = createRandomString();
@@ -83,7 +82,7 @@ class Auth0Client {
    * will be valid according to their expiration times.
    */
   async authorizeSilently() {
-    const { client_id, audience, scope, redirect_uri } = this.options;
+    const { client_id, audience, scope, redirect_uri, telemetry } = this.options;
     if (this.cache) return this.cache.access_token;
 
     const state = createRandomString();
@@ -157,13 +156,11 @@ class Auth0Client {
    * Performs a redirect to `/v2/logout` using the parameters provided
    * as arguments. [Read more about how Logout works at Auth0](https://auth0.com/docs/logout).
    */
-  logout() {
+  async logout() {
+    const {client_id, telemetry, redirect_uri} = this.options;
     window.location.assign(URL({
       path: this.domainUrl + "/v2/logout",
-      query: {
-        client_id: this.options.client_id,
-        telemetry
-      }
+      query: {client_id, telemetry, returnTo: redirect_uri}
     }));
   }
 }

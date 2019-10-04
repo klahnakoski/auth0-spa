@@ -1,7 +1,10 @@
 {
-  "auth0": {
-    "domain": "dev-8821kz09.auth0.com",
-    "client_id": "FYlBPbNm7vZi9YPwVFyR7J2TLKrzNtST",
-    "home_path": "/home"
-  }
+    "auth0": {
+        "domain": "dev-8821kz09.auth0.com",
+        "client_id": "FYlBPbNm7vZi9YPwVFyR7J2TLKrzNtST",
+        "home_path": "/home",
+        "telemetry": {
+            "url": "https://github.com/klahnakoski/auth0-spa"
+        }
+    }
 }

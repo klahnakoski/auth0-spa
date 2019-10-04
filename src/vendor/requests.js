@@ -68,6 +68,7 @@ function toQueryString(value) {
 
   return leaves(value)
     .map(encode)
+    .filter(exists)
     .join('&');
 }
 
