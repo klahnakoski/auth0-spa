@@ -15,9 +15,7 @@ import * as ClientStorage from './storage';
 import {DEFAULT_POPUP_CONFIG_OPTIONS, telemetry} from './constants';
 import {fetchJson, URL} from '../requests';
 import {Log} from "../logs";
-import {coalesce, exists} from "../utils";
-import {value2json} from "../convert";
-import {toPairs} from "../vectors";
+import {coalesce} from "../utils";
 
 async function createAuth0Client(options) {
   if (!window.crypto && (window).msCrypto) {
@@ -85,9 +83,13 @@ class Auth0Client {
   }
 
 
-  oauthToken = async (options) => {
+  oauthToken = async (options = {}) => {
+    const {code_verifier, code} = options;
     const body = {
-      ...toPairs(options).filter(exists).fromPairs(),
+      client_id: this.options.client_id,
+      redirect_uri: coalesce(this.options.redirect_uri, window.location.origin),
+      code_verifier,
+      code,
       grant_type: 'authorization_code'
     };
     Log.note("post to /oath/token  {{body|json}}", {body});
@@ -150,8 +152,9 @@ class Auth0Client {
     try {
       const {
         scope: loginScope,
-        redirect_uri,
+        redirect_uri: requestRedirect,
         appState,
+        audience: requestAudience,
         ...loginOptions  // do not use audience
       } = options;
       const state = encodeState(createRandomString());
@@ -159,26 +162,29 @@ class Auth0Client {
       const code_verifier = createRandomString();
       const code_challenge = bufferToBase64UrlEncoded(await sha256(code_verifier));
       const { domain, leeway, ...withoutDomain } = this.options;
-
+      const redirect_uri = coalesce(requestRedirect, this.options.redirect_uri);
+      const audience = coalesce(requestAudience, this.options.audience);
       const scope = unionScopes(this.DEFAULT_SCOPE, this.options.scope, loginScope);
 
       const url = this._authorizeUrl({
         ...withoutDomain,
         ...loginOptions,
+        audience,
         scope,
         response_type: 'code',
         response_mode: 'query',
         state,
         nonce,
-        redirect_uri: redirect_uri || this.options.redirect_uri,
+        redirect_uri,
         code_challenge,
         code_challenge_method: 'S256'
       });
       this.transactionManager.create(state, {
         nonce,
         code_verifier,
-        appState,
+        audience,
         scope,
+        appState,
       });
       Log.note("GOTO: {{url}}", {url});
       window.location.assign(url);
@@ -213,30 +219,29 @@ class Auth0Client {
       throw new Error('Invalid state');
     }
     this.transactionManager.remove(state);
+    const {audience, scope, code_verifier, nonce, appState} = transaction;
 
     const authResult = await this.oauthToken({
-      audience: coalesce(this.options.audience),
-      client_id: this.options.client_id,
-      code_verifier: transaction.code_verifier,
-      redirect_uri: coalesce(this.options.redirect_uri, window.location.origin),
+      code_verifier,
       code
     });
 
     const decodedToken = this._verifyIdToken(
       authResult.id_token,
-      transaction.nonce
+      nonce
     );
+    this.options.audience = audience;
+    this.options.scope = scope;
+
     const cacheEntry = {
       ...authResult,
       decodedToken,
-      audience: coalesce(transaction.audience),
-      scope: transaction.scope
+      audience,
+      scope
     };
     this.cache.save(cacheEntry);
     ClientStorage.save('auth0.is.authenticated', true, { daysUntilExpire: 1 });
-    return {
-      appState: transaction.appState
-    };
+    return {appState};
   }
 
   /**
@@ -289,10 +294,7 @@ class Auth0Client {
       throw new Error('Invalid state');
     }
     const authResult = await this.oauthToken({
-      audience,
-      client_id,
       code_verifier,
-      redirect_uri,
       code: codeResult.code
     });
     const decodedToken = this._verifyIdToken(authResult.id_token, nonce);

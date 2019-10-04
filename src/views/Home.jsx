@@ -47,7 +47,7 @@ class Home extends React.Component {
                 await auth0.handleRedirectCallback();
             } catch (e) {
                 Log.warning("problem with redirect", {cause: e});
-                window.location.assign(loco.origin);
+                window.history.replaceState({}, null, loco.origin);
             }
         }
 
@@ -71,7 +71,7 @@ class Home extends React.Component {
                         body: "{}"
                     },
                 );
-                Log.note("API {{response}}", {response});
+                Log.note("API {{response|json}}", {response});
             } catch (error) {
                 this.setState({error});
                 Log.warning("problem with getting token", error);
@@ -89,7 +89,10 @@ class Home extends React.Component {
             return (<div>WAIT</div>);
         }
         if (!user) {
-            return (<button onClick={() => auth0.loginWithRedirect()}>LOGIN</button>);
+            return (<button onClick={() => auth0.loginWithRedirect({
+                audience:"https://locahost/query",
+                scope:"query:send"
+            })}>LOGIN</button>);
         }
         return <div>
             <button onClick={() => auth0.logout()}>LOGOUT</button>
