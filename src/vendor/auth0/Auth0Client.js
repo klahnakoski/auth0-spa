@@ -1,21 +1,14 @@
-import {
-  bufferToBase64UrlEncoded,
-  createRandomString,
-  encodeState,
-  parseQueryResult,
-  runIframe,
-  sha256,
-  unionScopes
-} from './utils';
+import {createRandomString, runIframe, sha256, unionScopes} from './utils';
 
 import Cache from './cache';
 import TransactionManager from './transaction-manager';
 import {verify as verifyIdToken} from './jwt';
 import * as ClientStorage from './storage';
 import {DEFAULT_POPUP_CONFIG_OPTIONS, telemetry} from './constants';
-import {fetchJson, URL} from '../requests';
+import {fetchJson, fromQueryString, URL} from '../requests';
 import {Log} from "../logs";
 import {coalesce} from "../utils";
+import {bytesToBase64URL} from "../convert";
 
 async function createAuth0Client(options) {
   if (!window.crypto && (window).msCrypto) {
@@ -157,10 +150,10 @@ class Auth0Client {
         audience: requestAudience,
         ...loginOptions  // do not use audience
       } = options;
-      const state = encodeState(createRandomString());
+      const state = createRandomString();
       const nonce= createRandomString();
       const code_verifier = createRandomString();
-      const code_challenge = bufferToBase64UrlEncoded(await sha256(code_verifier));
+      const code_challenge = bytesToBase64URL(await sha256(code_verifier));
       const { domain, leeway, ...withoutDomain } = this.options;
       const redirect_uri = coalesce(requestRedirect, this.options.redirect_uri);
       const audience = coalesce(requestAudience, this.options.audience);
@@ -206,9 +199,7 @@ class Auth0Client {
         'There are no query params available at `window.location.search`.'
       );
     }
-    const { state, code, error, error_description } = parseQueryResult(
-      window.location.search.substr(1)
-    );
+    const { state, code, error, error_description } = fromQueryString(window.location.search);
 
     if (error) {
       Log.error("problem with callback {{detail|json}}", {detail: {error, error_description, state}});
@@ -268,11 +259,11 @@ class Auth0Client {
       if (cache) return cache.access_token;
     }
 
-    const state = encodeState(createRandomString());
+    const state = createRandomString();
     const nonce = createRandomString();
     const code_verifier = createRandomString();
     const code_challengeBuffer = await sha256(code_verifier);
-    const code_challenge = bufferToBase64UrlEncoded(code_challengeBuffer);
+    const code_challenge = bytesToBase64URL(code_challengeBuffer);
 
     const url = this._authorizeUrl({
       ...withoutDomain,

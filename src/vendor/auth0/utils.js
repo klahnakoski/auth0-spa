@@ -1,8 +1,7 @@
-import { DEFAULT_AUTHORIZE_TIMEOUT_IN_SECONDS } from './constants';
-import {Log} from '../logs';
+import {DEFAULT_AUTHORIZE_TIMEOUT_IN_SECONDS} from './constants';
 import {selectFrom} from "../vectors";
 import {exists} from "../utils";
-
+import {bytesToBase64URL} from "../convert";
 
 const TIMEOUT_ERROR = { error: 'timeout', error_description: 'Timeout' };
 export const unionScopes = (...scopes) => selectFrom(scopes)
@@ -14,20 +13,6 @@ export const unionScopes = (...scopes) => selectFrom(scopes)
     .sort()
     .join(' ')
 ;
-
-export const parseQueryResult = (queryString) => {
-  let queryParams = queryString.split('&');
-  let parsedQuery = {};
-  queryParams.forEach(qp => {
-    let [key, val] = qp.split('=');
-    parsedQuery[key] = decodeURIComponent(val);
-  });
-
-  return {
-    ...parsedQuery,
-    expires_in: parseInt(parsedQuery.expires_in)
-  };
-};
 
 export const runIframe = (authorizeUrl, eventOrigin) => {
   return new Promise((res, rej) => {
@@ -93,23 +78,9 @@ export const runPopup = (
 };
 
 export const createRandomString = () => {
-  const charset =
-    '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_';
-  let random = '';
-  const randomValues = Array.from(crypto.getRandomValues(new Uint8Array(43)));
-  randomValues.forEach(v => (random += charset[v % charset.length]));
-  return random;
+  return bytesToBase64URL(crypto.getRandomValues(new Uint8Array(32)));
 };
 
-export const encodeState = (state) => btoa(state);
-export const decodeState = (state) => atob(state);
-
-export const createQueryParams = (params) => {
-  return Object.keys(params)
-    .filter(k => typeof params[k] !== 'undefined')
-    .map(k => encodeURIComponent(k) + '=' + encodeURIComponent(params[k]))
-    .join('&');
-};
 
 export const sha256 = async (s) => {
   const response = await Promise.resolve(
@@ -126,31 +97,5 @@ export const sha256 = async (s) => {
     return (response).result;
   }
   return response;
-};
-
-const urlEncodeB64 = (input) => {
-  const b64Chars = { '+': '-', '/': '_', '=': '' };
-  return input.replace(/[+/=]/g, (m) => b64Chars[m]);
-};
-
-// https://stackoverflow.com/questions/30106476/
-const decodeB64 = input =>
-  decodeURIComponent(
-    atob(input)
-      .split('')
-      .map(c => {
-        return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
-      })
-      .join('')
-  );
-
-export const urlDecodeB64 = (input) =>
-  decodeB64(input.replace(/_/g, '/').replace(/-/g, '+'));
-
-export const bufferToBase64UrlEncoded = input => {
-  const ie11SafeInput = new Uint8Array(input);
-  return urlEncodeB64(
-    window.btoa(String.fromCharCode(...Array.from(ie11SafeInput)))
-  );
 };
 

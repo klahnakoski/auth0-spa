@@ -1,4 +1,4 @@
-import { urlDecodeB64 } from './utils';
+import {base64URLToBytes} from "../convert";
 
 const idTokendecoded = [
   'iss',
@@ -35,7 +35,7 @@ const idTokendecoded = [
 
 export const decode = (token) => {
   const [header, payload, signature] = token.split('.');
-  const payloadJSON = JSON.parse(urlDecodeB64(payload));
+  const payloadJSON = JSON.parse(base64URLToBytes(payload));
   const claims = { __raw: token };
   const user = {};
   Object.keys(payloadJSON).forEach(k => {
@@ -46,7 +46,7 @@ export const decode = (token) => {
   });
   return {
     encoded: { header, payload, signature },
-    header: JSON.parse(urlDecodeB64(header)),
+    header: JSON.parse(base64URLToBytes(header)),
     claims,
     user
   };
