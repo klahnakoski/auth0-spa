@@ -2,16 +2,14 @@ import React from "react";
 import ReactDOM from "react-dom";
 import {HashRouter, Route, Switch} from "react-router-dom";
 
-import Home from "./views/Home";
+import Home from "./Home";
+import config from "./config";
 
 const App = () => {
-    const {origin, search, hash} = window.location;
-    const loco = {origin, search, hash};
-
     return (
         <HashRouter>
             <Switch>
-                <Route path="/" exact component={(props) => new Home({loco, ...props})}/>
+                <Route path={config.home_path} exact component={Home}/>
             </Switch>
         </HashRouter>
     );

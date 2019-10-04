@@ -1,148 +1,71 @@
 import {createRandomString, runIframe, sha256, unionScopes} from './utils';
-
-import Cache from './cache';
 import TransactionManager from './transaction-manager';
 import {verify as verifyIdToken} from './jwt';
-import * as ClientStorage from './storage';
-import {DEFAULT_POPUP_CONFIG_OPTIONS, telemetry} from './constants';
+import {telemetry} from './constants';
 import {fetchJson, fromQueryString, URL} from '../requests';
 import {Log} from "../logs";
-import {coalesce} from "../utils";
+import {exists} from "../utils";
 import {bytesToBase64URL} from "../convert";
+
+const DEFAULT_SCOPE = 'openid profile email';
 
 
 /**
- * Auth0 SDK for Single Page Applications using [Authorization Code Grant Flow with PKCE](https://auth0.com/docs/api-auth/tutorials/authorization-code-grant-pkce).
+ * A inter-session auth0 interface object
+ * only one allowed per page
  */
 class Auth0Client {
-  DEFAULT_SCOPE = 'openid profile email';
 
-  constructor(options) {
-    this.options = options;
-    this.cache = new Cache();
+  constructor({ domain, leeway, client_id, audience, scope, redirect_uri }) {
+    this.options = { leeway, client_id, audience, scope, redirect_uri };
+    this.cache = null;
     this.transactionManager = new TransactionManager();
-    this.domainUrl = `https://${this.options.domain}`;
-  }
-  _authorizeUrl(authorizeOptions) {
-    return URL({
-      path: this.domainUrl + "/authorize",
-      query: {...authorizeOptions, telemetry}
-    });
-  }
-  _verifyIdToken(id_token, nonce) {
-    return verifyIdToken({
-      iss: `${this.domainUrl}/`,
-      aud: this.options.client_id,
-      id_token,
-      nonce,
-      leeway: this.options.leeway
-    });
+    this.domainUrl = "https://" + domain;
   }
 
+  async getUser(){
+    return this.cache && this.cache.decodedToken.user;
+  }
 
-  oauthToken = async (options = {}) => {
-    const {code_verifier, code} = options;
-    const body = {
-      client_id: this.options.client_id,
-      redirect_uri: coalesce(this.options.redirect_uri, window.location.origin),
-      code_verifier,
-      code,
-      grant_type: 'authorization_code'
-    };
-    Log.note("post to /oath/token  {{body|json}}", {body});
-
-    return fetchJson(
-        `${this.domainUrl}/oauth/token`,
-        {
-          method: 'POST',
-          headers: {"Content-type": "application/json"},
-          body: JSON.stringify(body)
-        }
-    );
-
-  };
-
-  /**
-   * ```js
-   * const user = await auth0.getUser();
-   * ```
-   *
-   * Returns the user information if available (decoded
-   * from the `id_token`).
-   *
-   * @param options
-   */
-  async getUser(options={}){
-    options.audience = coalesce(options.audience, this.options.audience);
-    options.scope = unionScopes(this.DEFAULT_SCOPE, options.scope, this.options.scope);
-    const cache = this.cache.get(options);
-    return cache && cache.decodedToken.user;
+  async getIdTokenClaims() {
+    return this.cache && this.cache.decodedToken.claims;
   }
 
   /**
-   * ```js
-   * const claims = await auth0.getIdTokenClaims();
-   * ```
-   *
-   * Returns all claims from the id_token if available.
-   *
-   * @param options
-   */
-  async getIdTokenClaims(options={}) {
-    options.audience = coalesce(options.audience, this.options.audience);
-    options.scope = unionScopes(this.DEFAULT_SCOPE, options.scope, this.options.scope);
-    const cache = this.cache.get(options);
-    return cache && cache.decodedToken.claims;
-  }
-
-  /**
-   * ```js
-   * await auth0.loginWithRedirect(options);
-   * ```
-   *
    * Performs a redirect to `/authorize` using the parameters
    * provided as arguments. Random and secure `state` and `nonce`
    * parameters will be auto-generated.
-   *
-   * @param options
    */
-  async loginWithRedirect(options={}){
+  async authorizeWithRedirect(){
     try {
-      const {
-        scope: loginScope,
-        redirect_uri: requestRedirect,
-        appState,
-        audience: requestAudience,
-        ...loginOptions  // do not use audience
-      } = options;
+      const { client_id, audience, scope, redirect_uri} = this.options;
+
       const state = createRandomString();
       const nonce = createRandomString();
       const code_verifier = createRandomString();
       const code_challenge = bytesToBase64URL(await sha256(code_verifier));
-      const { domain, leeway, ...withoutDomain } = this.options;
-      const redirect_uri = coalesce(requestRedirect, this.options.redirect_uri);
-      const audience = coalesce(requestAudience, this.options.audience);
-      const scope = unionScopes(this.DEFAULT_SCOPE, this.options.scope, loginScope);
 
-      const url = this._authorizeUrl({
-        ...withoutDomain,
-        ...loginOptions,
-        audience,
-        scope,
-        response_type: 'code',
-        response_mode: 'query',
-        state,  // https://auth0.com/docs/protocols/oauth2/oauth-state
-        nonce,  // https://openid.net/specs/openid-connect-core-1_0.html#ImplicitAuthRequest
-        redirect_uri,
-        code_challenge,
-        code_challenge_method: 'S256'
+      const url = URL({
+        path: this.domainUrl + "/authorize",
+        query: {
+          client_id,
+          redirect_uri,
+          audience,
+          scope,
+          response_type: 'code',
+          response_mode: 'query',
+          state,  // https://auth0.com/docs/protocols/oauth2/oauth-state
+          nonce,  // https://openid.net/specs/openid-connect-core-1_0.html#ImplicitAuthRequest
+          code_challenge,
+          code_challenge_method: 'S256',
+          telemetry,
+        }
       });
       this.transactionManager.create(state, {
         nonce,
         code_verifier,
-        audience,
-        scope,
-        appState,
+        audience,  // FOR RECOVERY LATER
+        scope,    // FOR RECOVERY LATER
       });
       Log.note("GOTO: {{url}}", {url});
       window.location.assign(url);
@@ -153,156 +76,95 @@ class Auth0Client {
   };
 
   /**
-   * After the browser redirects back to the callback page,
-   * call `handleRedirectCallback` to handle success and error
-   * responses from Auth0. If the response is successful, results
-   * will be valid according to their expiration times.
-   */
-  async handleRedirectCallback() {
-    if (!window.location.search) {
-      Log.error('There are no query params available at `window.location.search`.');
-    }
-    const { state, code, error, error_description } = fromQueryString(window.location.search);
-
-    if (error) {
-      Log.error("problem with callback {{detail|json}}", {detail: {error, error_description, state}});
-    }
-
-    const transaction = this.transactionManager.get(state);
-    if (!transaction) {
-      Log.error('Invalid state');
-    }
-    this.transactionManager.remove(state);
-    const {audience, scope, code_verifier, nonce, appState} = transaction;
-
-    const authResult = await this.oauthToken({
-      code_verifier,
-      code
-    });
-
-    const decodedToken = this._verifyIdToken(
-      authResult.id_token,
-      nonce
-    );
-    this.options.audience = audience;
-    this.options.scope = scope;
-
-    const cacheEntry = {
-      ...authResult,
-      decodedToken,
-      audience,
-      scope
-    };
-    this.cache.save(cacheEntry);
-    ClientStorage.save('auth0.is.authenticated', true, { daysUntilExpire: 1 });
-    return {appState};
-  }
-
-  /**
-   * ```js
-   * const token = await auth0.getTokenSilently(options);
-   * ```
-   *
    * If there's a valid token stored, return it. Otherwise, opens an
    * iframe with the `/authorize` URL using the parameters provided
    * as arguments. Random and secure `state` and `nonce` parameters
    * will be auto-generated. If the response is successful, results
    * will be valid according to their expiration times.
-   *
-   * @param options
    */
-  async getTokenSilently(options = {}) {
-    const {audience: requestAudience, scope: requestScope, redirect_uri: requestRedirect, ignoreCache = false} = options;
-    const { domain, leeway, client_id, audience: authAudience, scope: authScope, redirect_uri: authRedirect, ...withoutDomain } = this.options;
-    const audience = coalesce(requestAudience, authAudience);
-    const scope = unionScopes(requestScope, authScope, this.DEFAULT_SCOPE);
-    const redirect_uri = coalesce(requestRedirect, authRedirect, window.location.origin);
-    if (!options.ignoreCache) {
-      const cache = this.cache.get({scope, audience});
-      if (cache) return cache.access_token;
-    }
+  async authorizeSilently() {
+    const { client_id, audience, scope, redirect_uri } = this.options;
+    if (this.cache) return this.cache.access_token;
 
     const state = createRandomString();
     const nonce = createRandomString();
     const code_verifier = createRandomString();
     const code_challenge = bytesToBase64URL(await sha256(code_verifier));
 
-    const url = this._authorizeUrl({
-      ...withoutDomain,
-      client_id,
-      audience,
-      scope,
-      response_type: 'code',
-      state,
-      nonce,
-      redirect_uri,
-      code_challenge,
-      code_challenge_method: 'S256',
-      prompt: 'none',
-      response_mode: 'web_message',
-    });
-
-    const codeResult = await runIframe(url, this.domainUrl);
-    if (state !== codeResult.state) {
-      throw new Error('Invalid state');
-    }
-    const authResult = await this.oauthToken({
-      code_verifier,
-      code: codeResult.code
-    });
-    const decodedToken = this._verifyIdToken(authResult.id_token, nonce);
-    const cacheEntry = {
-      ...authResult,
-      decodedToken,
-      scope,
-      audience
-    };
-    this.cache.save(cacheEntry);
-    ClientStorage.save('auth0.is.authenticated', true, { daysUntilExpire: 1 });
-    return authResult.access_token;
-  }
-
-  /**
-   * ```js
-   * const token = await auth0.getTokenWithPopup(options);
-   * ```
-   * Opens a popup with the `/authorize` URL using the parameters
-   * provided as arguments. Random and secure `state` and `nonce`
-   * parameters will be auto-generated. If the response is successful,
-   * results will be valid according to their expiration times.
-   *
-   * @param options
-   * @param config
-   */
-  async getTokenWithPopup(options = {}, config = DEFAULT_POPUP_CONFIG_OPTIONS) {
-    options.scope = unionScopes(this.DEFAULT_SCOPE, this.options.scope, options.scope);
-    options.audience = coalesce(options.audience, this.options.audience);
-    await this.loginWithPopup(options, config);
-    const cache = this.cache.get(options);
-    return cache.access_token;
-  }
-
-  /**
-   * ```js
-   * auth0.logout();
-   * ```
-   *
-   * Performs a redirect to `/v2/logout` using the parameters provided
-   * as arguments. [Read more about how Logout works at Auth0](https://auth0.com/docs/logout).
-   *
-   * @param options
-   */
-  logout(options = {}) {
-    ClientStorage.remove('auth0.is.authenticated');
     const url = URL({
-      path: this.domainUrl + "/v2/logout",
+      path: this.domainUrl + "/authorize",
       query: {
-        ...options,
-        client_id: coalesce(options.client_id,  this.options.client_id),
-        telemetry
+        client_id,
+        redirect_uri,
+        audience,
+        scope,
+        response_type: 'code',
+        state,
+        nonce,
+        code_challenge,
+        code_challenge_method: 'S256',
+        prompt: 'none',
+        response_mode: 'web_message',
+        telemetry,
       }
     });
-    window.location.assign(url);
+
+    const {code, ...authResult} = await runIframe(url, this.domainUrl);
+    if (state !== authResult.state) {
+      throw new Error('Invalid state');
+    }
+
+    this.verifyAuthorize({audience, scope, code_verifier, nonce, code});
+    return this.cache.access_token;
+  }
+
+  async verifyAuthorize({audience, scope, code_verifier, nonce, code}){
+    const {leeway, client_id, redirect_uri} = this.options;
+    const authResult = await fetchJson(
+        this.domainUrl + "/oauth/token",
+        {
+          method: 'POST',
+          headers: {"Content-type": "application/json"},
+          body: JSON.stringify({
+            client_id,
+            redirect_uri,
+            code_verifier,
+            code,
+            grant_type: 'authorization_code'
+          })
+        }
+    );
+
+    const {id_token} = authResult;
+    const decodedToken = verifyIdToken({
+      iss: this.domainUrl + "/",
+      aud: client_id,
+      id_token,
+      nonce,
+      leeway: leeway
+    });
+
+    this.cache = {
+      ...authResult,
+      decodedToken,
+      audience,
+      scope
+    };
+  }
+
+
+  /**
+   * Performs a redirect to `/v2/logout` using the parameters provided
+   * as arguments. [Read more about how Logout works at Auth0](https://auth0.com/docs/logout).
+   */
+  logout() {
+    window.location.assign(URL({
+      path: this.domainUrl + "/v2/logout",
+      query: {
+        client_id: this.options.client_id,
+        telemetry
+      }
+    }));
   }
 }
 
@@ -323,20 +185,39 @@ async function newInstance(options) {
     `);
   }
 
-  const auth0 = new Auth0Client(options);
+  const location = window.location.origin + options.home_path;
+  const redirect_uri = options.redirect_uri || window.location.origin+window.location.pathname;
+  if (redirect_uri !== location){
+    Log.error("expecting SPA to be located at {{location}}", {location})
+  }
 
-  if (!ClientStorage.get('auth0.is.authenticated')) {
-    return auth0;
+  const { state, code, error, error_description } = fromQueryString(window.location.search);
+  if (error) {
+    Log.error("problem with callback {{detail|json}}", {detail: {error, error_description, state}});
   }
-  try {
-    await auth0.getTokenSilently({
-      audience: options.audience,
-      scope: options.scope,
-      ignoreCache: true
-    });
-  } catch (error) {
-    Log.warning("get token did not work", error);
+
+  const audience = options.audience;
+  const scope = unionScopes(options.scope, DEFAULT_SCOPE);
+
+  const auth0 = new Auth0Client({
+    ...options,
+    audience,
+    scope,
+    redirect_uri
+  });
+
+  if (exists(state) && exists(code)){
+    // THIS MAY BE A CALLBACK, AND WE CAN RECOVER THE AUTH STATE
+    const transaction = auth0.transactionManager.get(state);
+    if (transaction){
+      auth0.options.audience = transaction.audience;
+      auth0.options.scope = transaction.scope;
+      auth0.transactionManager.remove(state);
+      await auth0.verifyAuthorize({code, ...transaction});
+      return auth0;
+    }
   }
+
   return auth0;
 }
 
