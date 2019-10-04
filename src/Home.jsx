@@ -3,9 +3,9 @@ import React from "react";
 import {Log} from "../vendor/logs";
 import {value2json} from "../vendor/convert";
 import {fromQueryString} from "../vendor/requests";
-import {createAuth0Client} from "../vendor/auth0/Auth0Client";
-import OPTIONS from '../auth_config.json';
-
+import {Auth0Client} from "../vendor/auth0/Auth0Client";
+import OPTIONS from '../config.json';
+import {decode as decodeJwt} from "../vendor/auth0/jwt";
 
 class Home extends React.Component {
 
@@ -39,10 +39,10 @@ class Home extends React.Component {
         };
         Log.note("initOptions: {{initOptions|json}}", {initOptions});
 
-        const auth0 = await createAuth0Client(initOptions);
+        const auth0 = await Auth0Client.newInstance(initOptions);
         this.setState({auth0});
 
-        if (loco.search.includes("code=")) {
+        if (loco.search.includes("state=")) {
             try {
                 await auth0.handleRedirectCallback();
             } catch (e) {
@@ -96,7 +96,7 @@ class Home extends React.Component {
         }
         return <div>
             <button onClick={() => auth0.logout()}>LOGOUT</button>
-            {token && (<pre>{value2json(token)}</pre>)}
+            {token && (<pre>{value2json(decodeJwt(token))}</pre>)}
             {user && (<pre>{value2json(user)}</pre>)}
             READY!
         </div>;

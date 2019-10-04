@@ -10,42 +10,6 @@ import {Log} from "../logs";
 import {coalesce} from "../utils";
 import {bytesToBase64URL} from "../convert";
 
-async function createAuth0Client(options) {
-  if (!window.crypto && (window).msCrypto) {
-    (window).crypto = (window).msCrypto;
-  }
-  if (!window.crypto) {
-    throw new Error(
-        'For security reasons, `window.crypto` is required to run `auth0-spa-js`.'
-    );
-  }
-  if (typeof window.crypto.subtle === 'undefined') {
-    throw new Error(`
-      auth0-spa-js must run on a secure origin.
-      See https://github.com/auth0/auth0-spa-js/blob/master/FAQ.md#why-do-i-get-error-invalid-state-in-firefox-when-refreshing-the-page-immediately-after-a-login 
-      for more information.
-    `);
-  }
-
-  const auth0 = new Auth0Client(options);
-
-  if (!ClientStorage.get('auth0.is.authenticated')) {
-    return auth0;
-  }
-  try {
-    await auth0.getTokenSilently({
-      audience: options.audience,
-      scope: options.scope,
-      ignoreCache: true
-    });
-  } catch (error) {
-    Log.warning("get token did not work", error);
-  }
-  return auth0;
-}
-
-
-
 
 /**
  * Auth0 SDK for Single Page Applications using [Authorization Code Grant Flow with PKCE](https://auth0.com/docs/api-auth/tutorials/authorization-code-grant-pkce).
@@ -97,6 +61,7 @@ class Auth0Client {
     );
 
   };
+
   /**
    * ```js
    * const user = await auth0.getUser();
@@ -151,7 +116,7 @@ class Auth0Client {
         ...loginOptions  // do not use audience
       } = options;
       const state = createRandomString();
-      const nonce= createRandomString();
+      const nonce = createRandomString();
       const code_verifier = createRandomString();
       const code_challenge = bytesToBase64URL(await sha256(code_verifier));
       const { domain, leeway, ...withoutDomain } = this.options;
@@ -166,8 +131,8 @@ class Auth0Client {
         scope,
         response_type: 'code',
         response_mode: 'query',
-        state,
-        nonce,
+        state,  // https://auth0.com/docs/protocols/oauth2/oauth-state
+        nonce,  // https://openid.net/specs/openid-connect-core-1_0.html#ImplicitAuthRequest
         redirect_uri,
         code_challenge,
         code_challenge_method: 'S256'
@@ -195,9 +160,7 @@ class Auth0Client {
    */
   async handleRedirectCallback() {
     if (!window.location.search) {
-      throw new Error(
-        'There are no query params available at `window.location.search`.'
-      );
+      Log.error('There are no query params available at `window.location.search`.');
     }
     const { state, code, error, error_description } = fromQueryString(window.location.search);
 
@@ -207,7 +170,7 @@ class Auth0Client {
 
     const transaction = this.transactionManager.get(state);
     if (!transaction) {
-      throw new Error('Invalid state');
+      Log.error('Invalid state');
     }
     this.transactionManager.remove(state);
     const {audience, scope, code_verifier, nonce, appState} = transaction;
@@ -262,8 +225,7 @@ class Auth0Client {
     const state = createRandomString();
     const nonce = createRandomString();
     const code_verifier = createRandomString();
-    const code_challengeBuffer = await sha256(code_verifier);
-    const code_challenge = bytesToBase64URL(code_challengeBuffer);
+    const code_challenge = bytesToBase64URL(await sha256(code_verifier));
 
     const url = this._authorizeUrl({
       ...withoutDomain,
@@ -344,4 +306,40 @@ class Auth0Client {
   }
 }
 
-export { createAuth0Client, Auth0Client}
+async function newInstance(options) {
+  if (!window.crypto && (window).msCrypto) {
+    (window).crypto = (window).msCrypto;
+  }
+  if (!window.crypto) {
+    throw new Error(
+        'For security reasons, `window.crypto` is required to run `auth0-spa-js`.'
+    );
+  }
+  if (typeof window.crypto.subtle === 'undefined') {
+    throw new Error(`
+      auth0-spa-js must run on a secure origin.
+      See https://github.com/auth0/auth0-spa-js/blob/master/FAQ.md#why-do-i-get-error-invalid-state-in-firefox-when-refreshing-the-page-immediately-after-a-login 
+      for more information.
+    `);
+  }
+
+  const auth0 = new Auth0Client(options);
+
+  if (!ClientStorage.get('auth0.is.authenticated')) {
+    return auth0;
+  }
+  try {
+    await auth0.getTokenSilently({
+      audience: options.audience,
+      scope: options.scope,
+      ignoreCache: true
+    });
+  } catch (error) {
+    Log.warning("get token did not work", error);
+  }
+  return auth0;
+}
+
+Auth0Client.newInstance = newInstance;
+
+export { Auth0Client}
