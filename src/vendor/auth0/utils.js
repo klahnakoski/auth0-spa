@@ -1,9 +1,10 @@
-import {DEFAULT_AUTHORIZE_TIMEOUT_IN_SECONDS} from './constants';
 import {selectFrom} from "../vectors";
 import {exists} from "../utils";
 import {bytesToBase64URL} from "../convert";
 
+const DEFAULT_AUTHORIZE_TIMEOUT_IN_SECONDS = 60;
 const TIMEOUT_ERROR = { error: 'timeout', error_description: 'Timeout' };
+
 export const unionScopes = (...scopes) => selectFrom(scopes)
     .filter(exists)
     .map(x => x.split(' '))

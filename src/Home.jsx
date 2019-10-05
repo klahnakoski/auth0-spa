@@ -2,10 +2,33 @@ import React from "react";
 
 import {Log} from "./vendor/logs";
 import {value2json} from "./vendor/convert";
-import {fromQueryString} from "./vendor/requests";
+import {fetchJson, fromQueryString} from "./vendor/requests";
 import {Auth0Client} from "./vendor/auth0/Auth0Client";
 import config from './config.json';
 import {decode as decodeJwt} from "./vendor/auth0/jwt";
+import {missing} from "./vendor/utils";
+import {GMTDate as Date} from "./vendor/dates";
+
+
+const dateFormat = (unix) => {
+    const d = Date.newInstance(unix);
+    return d && d.format('yyyy-MM-dd HH:mm:ss');
+};
+
+const decodeToken = (token) => {
+    if (missing(token)) return null;
+
+    if (!token.includes(".")) return token;
+    const expand = decodeJwt(token);
+
+    expand.claims._expiry = dateFormat(expand.claims.exp);
+    expand.claims._issued = dateFormat(expand.claims.iat);
+    expand.claims._not_before = dateFormat(expand.claims.nbf);
+    return value2json(expand);
+};
+
+
+
 
 class Home extends React.Component {
 
@@ -27,45 +50,73 @@ class Home extends React.Component {
             return
         }
 
-        const initOptions = {
-            ...config.auth0,
-            scope: 'openid email profile',
-        };
+        const initOptions = config.auth0;
         Log.note("initOptions: {{initOptions|json}}", {initOptions});
 
         const auth0 = await Auth0Client.newInstance(initOptions);
-        this.setState({auth0});
+        const user = auth0.getUser();
+        const token = auth0.getAccessToken();
+        this.setState({auth0, user, token});
+    }
 
-        const user = await auth0.getUser();
-        if (user) {
-            this.setState({user});
-            try {
-                const token = await auth0.authorizeSilently();
-                this.setState({token});
-
-                const response = await fetch(
-                    "http://localhost:5000/api/private",
-                    {
-                        method: 'POST',
-                        headers: new Headers({
-                            Accept: 'application/json',
-                            Authorization: "Bearer " + token
-                        }),
-                        referer: "",
-                        body: "{}"
-                    },
-                );
-                Log.note("API {{response|json}}", {response});
-            } catch (error) {
-                this.setState({error});
-                Log.warning("problem with getting token", error);
-            }
+    async apiScope(){
+        try{
+            const response = await fetchJson(
+                "http://localhost:5000/api/private-scoped",
+                {
+                    headers: {
+                        Authorization: "Bearer " + this.state.auth0.getAccessToken()
+                    }
+                },
+            );
+            this.setState({response});
+        } catch (error) {
+            this.setState({response: error});
         }
     }
 
+    async apiPrivate(){
+        try {
+            const response = await fetchJson(
+                "http://localhost:5000/api/private",
+                {
+                    headers: {
+                        Authorization: "Bearer " + this.state.auth0.getAccessToken()
+                    }
+                },
+            );
+            this.setState({response});
+        }catch (error) {
+            this.setState({response: error});
+        }
+    }
+
+    async refresh(){
+        try {
+            await this.state.auth0.refreshAccessToken()
+        }catch (error) {
+            this.setState({response: error});
+        }
+    }
+
+    async revoke(){
+        try {
+            await this.state.auth0.revokeRefeshToken()
+        }catch (error) {
+            this.setState({response: error});
+        }
+    }
+
+    async reauth(){
+        try {
+            await this.state.auth0.authorizeSilently()
+        }catch (error) {
+            this.setState({response: error});
+        }
+    }
 
     render() {
-        const {auth0, user, token, error} = this.state;
+        const {auth0, user, error, response} = this.state;
         if (error){
             return (<pre>{value2json(error)}</pre>);
         }
@@ -78,11 +129,24 @@ class Home extends React.Component {
                 scope:"query:send"
             })}>LOGIN</button>);
         }
+        const accessToken = auth0.getAccessToken();
+        const refreshToken = auth0.getRefreshToken();
         return <div>
-            <button onClick={() => auth0.logout()}>LOGOUT</button>
-            {token && (<pre>{value2json(token.includes(".") ? decodeJwt(token) : token)}</pre>)}
+            <h2>Actions</h2>
+            <button onClick={() => auth0.logout()}>LOGOUT</button>&nbsp;
+            <button onClick={() => this.reauth()}>REFRESH AUTHORIZE</button>&nbsp;
+            <button onClick={() => this.refresh()}>REFRESH ACCESS TOKEN</button>&nbsp;
+            <button onClick={() => this.revoke()}>REVOKE REFRESH TOKEN</button>&nbsp;
+            <button onClick={() => this.apiPrivate()}>PRIVATE API REQUEST</button>&nbsp;
+            <button onClick={() => this.apiScope()}>SCOPE API REQUEST</button>&nbsp;
+            <h2>API Response</h2>
+            {response && (<pre>{value2json(response)}</pre>)}
+            <h2>RefreshToken</h2>
+            {refreshToken && (<pre>{decodeToken(refreshToken)}</pre>)}
+            <h2>AccessToken</h2>
+            {accessToken && (<pre>{decodeToken(accessToken)}</pre>)}
+            <h2>User</h2>
             {user && (<pre>{value2json(user)}</pre>)}
-            READY!
         </div>;
     }
 

@@ -3,6 +3,8 @@
         "domain": "dev-8821kz09.auth0.com",
         "client_id": "FYlBPbNm7vZi9YPwVFyR7J2TLKrzNtST",
         "home_path": "/home",
+        "audience": "https://locahost/query",
+        "scope": "data:change",
         "telemetry": {
             "url": "https://github.com/klahnakoski/auth0-spa"
         }

@@ -1,10 +1,12 @@
 import {createRandomString, runIframe, sha256, unionScopes} from './utils';
 import TransactionManager from './transaction-manager';
 import {verify as verifyIdToken} from './jwt';
-import {fetchJson, fromQueryString, URL} from '../requests';
+import {fetchJson, toQueryString, fromQueryString, URL} from '../requests';
 import {Log} from "../logs";
-import {exists} from "../utils";
+import {exists, missing} from "../utils";
 import {bytesToBase64URL} from "../convert";
+import {GMTDate as Date} from "../dates";
+import {value2json} from "../convert";
 
 const DEFAULT_SCOPE = 'openid profile email';
 
@@ -22,18 +24,74 @@ class Auth0Client {
     this.domainUrl = "https://" + domain;
   }
 
-  async getUser(){
-    return this.cache && this.cache.decodedToken.user;
+  getUser(){
+    return this.cache && this.cache.decodedIdToken.user;
   }
 
-  async getIdTokenClaims() {
-    return this.cache && this.cache.decodedToken.claims;
+  getIdTokenClaims() {
+    return this.cache && this.cache.decodedIdToken.claims;
   }
+
+  getAccessToken(){
+    return this.cache && this.cache.access_token;
+  }
+
+  getRefreshToken(){
+    return this.cache && this.cache.refresh_token;
+  }
+
+  async refreshAccessToken(){
+    const now = Date.now();
+    const {client_id} = this.options;
+    const {refresh_token} = this.cache;
+    const authResult = await fetchJson(
+        this.domainUrl + "/oath/token",
+        {
+          method: 'POST',
+          headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+          body: toQueryString({
+            grant_type: 'refresh_token',
+            client_id,
+            refresh_token
+          })
+        }
+    );
+
+    // {
+    //   "access_token": "eyJ...MoQ",
+    //     "expires_in": 86400,
+    //     "scope": "openid offline_access",
+    //     "id_token": "eyJ...0NE",
+    //     "token_type": "Bearer"
+    // }
+
+    this.cache = {...this.cache, ...authResult};
+
+  }
+
+  async revokeRefeshToken(){
+    const {client_id} = this.options;
+    const token = this.cache.refresh_token;
+    await fetchJson(
+        this.domainUrl + "/oath/revoke",
+        {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: value2json({
+            client_id,
+            token,
+          })
+        }
+    );
+    this.cache.refresh_token = null;
+  }
+
+
 
   /**
    * Performs a redirect to `/authorize` using the parameters
-   * provided as arguments. Random and secure `state` and `nonce`
-   * parameters will be auto-generated.
+   * Random and secure `state` and `nonce` parameters will be
+   * auto-generated, and recorded for eventual callback processing
    */
   async authorizeWithRedirect(){
     try {
@@ -83,8 +141,7 @@ class Auth0Client {
    */
   async authorizeSilently() {
     const { client_id, audience, scope, redirect_uri, telemetry } = this.options;
-    if (this.cache) return this.cache.access_token;
-
+    
     const state = createRandomString();
     const nonce = createRandomString();
     const code_verifier = createRandomString();
@@ -113,17 +170,21 @@ class Auth0Client {
       throw new Error('Invalid state');
     }
 
-    this.verifyAuthorize({audience, scope, code_verifier, nonce, code});
+    this.verifyAuthorizeCode({code_verifier, nonce, code});
     return this.cache.access_token;
   }
 
-  async verifyAuthorize({audience, scope, code_verifier, nonce, code}){
-    const {leeway, client_id, redirect_uri} = this.options;
+  /*
+  After user authentication, call back to auth0 to get all the
+  tokens.  Verify the id token.
+   */
+  async verifyAuthorizeCode({code_verifier, nonce, code}){
+    const {leeway, client_id, redirect_uri, audience, scope} = this.options;
     const authResult = await fetchJson(
         this.domainUrl + "/oauth/token",
         {
           method: 'POST',
-          headers: {"Content-type": "application/json"},
+          headers: {"Content-Type": "application/json"},
           body: JSON.stringify({
             client_id,
             redirect_uri,
@@ -135,7 +196,7 @@ class Auth0Client {
     );
 
     const {id_token} = authResult;
-    const decodedToken = verifyIdToken({
+    const decodedIdToken = verifyIdToken({
       iss: this.domainUrl + "/",
       aud: client_id,
       id_token,
@@ -145,12 +206,11 @@ class Auth0Client {
 
     this.cache = {
       ...authResult,
-      decodedToken,
+      decodedIdToken,
       audience,
       scope
     };
   }
-
 
   /**
    * Performs a redirect to `/v2/logout` using the parameters provided
@@ -210,7 +270,7 @@ async function newInstance(options) {
       auth0.options.audience = transaction.audience;
       auth0.options.scope = transaction.scope;
       auth0.transactionManager.remove(state);
-      await auth0.verifyAuthorize({code, ...transaction});
+      await auth0.verifyAuthorizeCode({code, ...transaction});
       return auth0;
     }
   }
