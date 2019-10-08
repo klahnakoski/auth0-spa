@@ -271,7 +271,7 @@ async function newInstance({onStateChange, ...options}) {
   if (exists(state) && exists(code)){
     // THIS MAY BE A CALLBACK, AND WE CAN RECOVER THE AUTH STATE
     const transaction = auth0.authenticateCallbackState.get();
-    if (transaction){
+    if (transaction && transaction.state===state){
       auth0.options.audience = transaction.audience;
       auth0.options.scope = transaction.scope;
       auth0.authenticateCallbackState.clear();
