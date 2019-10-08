@@ -286,7 +286,7 @@ async function newInstance({onStateChange, ...options}) {
 Auth0Client.CLIENT = null;
 Auth0Client.newInstance = newInstance;
 
-export { Auth0Client}
+export { Auth0Client }
 
 
 

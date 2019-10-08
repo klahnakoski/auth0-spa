@@ -3,7 +3,7 @@ import React from "react";
 import {Log} from "./vendor/logs";
 import {value2json} from "./vendor/convert";
 import {fetchJson, fromQueryString} from "./vendor/requests";
-import {Auth0Client} from "./vendor/auth0/Auth0Client";
+import {Auth0Client} from "./vendor/auth0/client";
 import config from './config.json';
 import {decode as decodeJwt} from "./vendor/auth0/jwt";
 import {missing} from "./vendor/utils";
