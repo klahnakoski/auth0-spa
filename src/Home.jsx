@@ -28,8 +28,6 @@ const decodeToken = (token) => {
 };
 
 
-
-
 class Home extends React.Component {
 
     constructor(props) {
@@ -43,6 +41,10 @@ class Home extends React.Component {
     }
 
     async componentDidMount() {
+        return this.update();
+    }
+
+    async update(){
         if (window.location.search.includes("error=")){
             const details = fromQueryString(window.location.search);
             this.setState({error: details});
@@ -53,10 +55,16 @@ class Home extends React.Component {
         const initOptions = config.auth0;
         Log.note("initOptions: {{initOptions|json}}", {initOptions});
 
-        const auth0 = await Auth0Client.newInstance(initOptions);
+        let auth0 = this.auth0;
+        if (missing(auth0)) {
+            auth0 = await Auth0Client.newInstance({...initOptions, onStateChange: () => this.update()});
+            // this will be run multiple times, be sure we do not make multiple auth0
+            this.auth0 = auth0;
+        }
         const user = auth0.getUser();
         const token = auth0.getAccessToken();
         this.setState({auth0, user, token});
+
     }
 
     async apiScope(){
@@ -109,7 +117,8 @@ class Home extends React.Component {
 
     async reauth(){
         try {
-            await this.state.auth0.authorizeSilently()
+            await this.state.auth0.authorizeSilently();
+            this.setState({response: "refresh worked"})
         }catch (error) {
             this.setState({response: error});
         }

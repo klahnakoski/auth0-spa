@@ -1,15 +1,17 @@
 import {createRandomString, runIframe, sha256, unionScopes} from './utils';
 import TransactionManager from './transaction-manager';
-import {verify as verifyIdToken} from './jwt';
-import {fetchJson, toQueryString, fromQueryString, URL} from '../requests';
+import {verify as verifyIdToken, decode as decodeJwt} from './jwt';
+import {fetchJson, fromQueryString, toQueryString, URL} from '../requests';
 import {Log} from "../logs";
-import {exists, missing} from "../utils";
-import {bytesToBase64URL} from "../convert";
+import {exists} from "../utils";
+import {bytesToBase64URL, value2json} from "../convert";
+import {Cache} from "./cache";
 import {GMTDate as Date} from "../dates";
-import {value2json} from "../convert";
 
 const DEFAULT_SCOPE = 'openid profile email';
 
+
+let CURRENT_CLIENT = null;
 
 /**
  * A inter-session auth0 interface object
@@ -17,35 +19,37 @@ const DEFAULT_SCOPE = 'openid profile email';
  */
 class Auth0Client {
 
-  constructor({ domain, leeway, client_id, audience, scope, redirect_uri }) {
+  constructor({ domain, leeway, client_id, audience, scope, redirect_uri, onStateChange }) {
+    if (CURRENT_CLIENT) Log.error("There can be only one");
+    CURRENT_CLIENT = this;
     this.options = { leeway, client_id, audience, scope, redirect_uri };
-    this.cache = null;
+    this.authorizeSilentlyWorks = true;  //optimism
+    this.cache = new Cache({name: "auth0.client", onStateChange});
     this.transactionManager = new TransactionManager();
     this.domainUrl = "https://" + domain;
   }
 
   getUser(){
-    return this.cache && this.cache.decodedIdToken.user;
+    return this.cache.get("decodedIdToken.user");
   }
 
   getIdTokenClaims() {
-    return this.cache && this.cache.decodedIdToken.claims;
+    return this.cache.get("decodedIdToken.claims");
   }
 
   getAccessToken(){
-    return this.cache && this.cache.access_token;
+    return this.cache.get("access_token");
   }
 
   getRefreshToken(){
-    return this.cache && this.cache.refresh_token;
+    return this.cache.get("refresh_token");
   }
 
   async refreshAccessToken(){
-    const now = Date.now();
     const {client_id} = this.options;
-    const {refresh_token} = this.cache;
+    const {refresh_token} = this.cache.get();
     const authResult = await fetchJson(
-        this.domainUrl + "/oath/token",
+        this.domainUrl + "/oauth/token",
         {
           method: 'POST',
           headers: {'Content-Type': 'application/x-www-form-urlencoded'},
@@ -57,23 +61,14 @@ class Auth0Client {
         }
     );
 
-    // {
-    //   "access_token": "eyJ...MoQ",
-    //     "expires_in": 86400,
-    //     "scope": "openid offline_access",
-    //     "id_token": "eyJ...0NE",
-    //     "token_type": "Bearer"
-    // }
-
-    this.cache = {...this.cache, ...authResult};
-
+    this.cache.set({...this.cache.get(), ...authResult});
   }
 
   async revokeRefeshToken(){
     const {client_id} = this.options;
     const token = this.cache.refresh_token;
     await fetchJson(
-        this.domainUrl + "/oath/revoke",
+        this.domainUrl + "/oauth/revoke",
         {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
@@ -83,10 +78,8 @@ class Auth0Client {
           })
         }
     );
-    this.cache.refresh_token = null;
+    this.cache.set({...this.cache.get(), refresh_token: null});
   }
-
-
 
   /**
    * Performs a redirect to `/authorize` using the parameters
@@ -140,8 +133,10 @@ class Auth0Client {
    * will be valid according to their expiration times.
    */
   async authorizeSilently() {
+    if (Date.now().unix() < this.cache.get("decodedAccessToken.claims.exp")) return;
+
     const { client_id, audience, scope, redirect_uri, telemetry } = this.options;
-    
+
     const state = createRandomString();
     const nonce = createRandomString();
     const code_verifier = createRandomString();
@@ -165,13 +160,19 @@ class Auth0Client {
       }
     });
 
-    const {code, ...authResult} = await runIframe(url, this.domainUrl);
-    if (state !== authResult.state) {
-      throw new Error('Invalid state');
+    try {
+      if (this.authorizeSilentlyWorks) {
+        const {code, ...authResult} = await runIframe(url, this.domainUrl);
+        if (state !== authResult.state) Log.error('Invalid state');
+        this.verifyAuthorizeCode({code_verifier, nonce, code});
+        return
+      }
+    }catch(e){
+      // EXPECTED PATH DURING DEVELOPMENT
+      // https://github.com/auth0/auth0.js/issues/435#issuecomment-302113245
+      this.authorizeSilentlyWorks=false;
     }
-
-    this.verifyAuthorizeCode({code_verifier, nonce, code});
-    return this.cache.access_token;
+    window.open(url, '_blank');
   }
 
   /*
@@ -196,6 +197,7 @@ class Auth0Client {
     );
 
     const {id_token} = authResult;
+    const decodedAccessToken = decodeJwt(authResult.access_token);
     const decodedIdToken = verifyIdToken({
       iss: this.domainUrl + "/",
       aud: client_id,
@@ -204,12 +206,13 @@ class Auth0Client {
       leeway: leeway
     });
 
-    this.cache = {
+    this.cache.set({
       ...authResult,
+      decodedAccessToken,
       decodedIdToken,
       audience,
       scope
-    };
+    });
   }
 
   /**
@@ -217,6 +220,7 @@ class Auth0Client {
    * as arguments. [Read more about how Logout works at Auth0](https://auth0.com/docs/logout).
    */
   async logout() {
+    this.cache.clear();
     const {client_id, telemetry, redirect_uri} = this.options;
     window.location.assign(URL({
       path: this.domainUrl + "/v2/logout",
@@ -225,7 +229,7 @@ class Auth0Client {
   }
 }
 
-async function newInstance(options) {
+async function newInstance({onStateChange, ...options}) {
   if (!window.crypto && (window).msCrypto) {
     (window).crypto = (window).msCrypto;
   }
@@ -260,7 +264,8 @@ async function newInstance(options) {
     ...options,
     audience,
     scope,
-    redirect_uri
+    redirect_uri,
+    onStateChange
   });
 
   if (exists(state) && exists(code)){
@@ -271,8 +276,8 @@ async function newInstance(options) {
       auth0.options.scope = transaction.scope;
       auth0.transactionManager.remove(state);
       await auth0.verifyAuthorizeCode({code, ...transaction});
-      return auth0;
     }
+    window.history.replaceState(null, null, location);
   }
 
   return auth0;
@@ -281,3 +286,6 @@ async function newInstance(options) {
 Auth0Client.newInstance = newInstance;
 
 export { Auth0Client}
+
+
+

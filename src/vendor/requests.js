@@ -1,8 +1,6 @@
 /* global fetch */
 import { parse } from 'query-string';
-import {
-  sleep, exists, isArray, isString, toArray, missing,
-} from './utils';
+import {exists, isArray, isString, toArray, missing} from './utils';
 import { Data } from './datas';
 import { Duration } from './durations';
 import { GMTDate as Date } from './dates';
@@ -10,6 +8,7 @@ import strings from './strings';
 import { Log } from './logs';
 import { leaves, toPairs } from './vectors';
 import { KVStore } from './db_cache';
+import {sleep} from './signals';
 
 /*
 Parse a query string into an object. Leading ? or # are ignored, so you can
