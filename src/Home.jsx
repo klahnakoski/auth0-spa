@@ -55,12 +55,8 @@ class Home extends React.Component {
         const initOptions = config.auth0;
         Log.note("initOptions: {{initOptions|json}}", {initOptions});
 
-        let auth0 = this.auth0;
-        if (missing(auth0)) {
-            auth0 = await Auth0Client.newInstance({...initOptions, onStateChange: () => this.update()});
-            // this will be run multiple times, be sure we do not make multiple auth0
-            this.auth0 = auth0;
-        }
+        // update() is run multiple times, be sure we do not make multiple auth0
+        const auth0 = await Auth0Client.newInstance({...initOptions, onStateChange: () => this.update()});
         const user = auth0.getUser();
         const token = auth0.getAccessToken();
         this.setState({auth0, user, token});

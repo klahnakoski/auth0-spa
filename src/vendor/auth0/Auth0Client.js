@@ -1,6 +1,5 @@
 import {createRandomString, runIframe, sha256, unionScopes} from './utils';
-import TransactionManager from './transaction-manager';
-import {verify as verifyIdToken, decode as decodeJwt} from './jwt';
+import {decode as decodeJwt, verify as verifyIdToken} from './jwt';
 import {fetchJson, fromQueryString, toQueryString, URL} from '../requests';
 import {Log} from "../logs";
 import {exists} from "../utils";
@@ -8,10 +7,9 @@ import {bytesToBase64URL, value2json} from "../convert";
 import {Cache} from "./cache";
 import {GMTDate as Date} from "../dates";
 
+// use {"scope": "offline_access"} to turn on refresh tokens
 const DEFAULT_SCOPE = 'openid profile email';
 
-
-let CURRENT_CLIENT = null;
 
 /**
  * A inter-session auth0 interface object
@@ -20,12 +18,12 @@ let CURRENT_CLIENT = null;
 class Auth0Client {
 
   constructor({ domain, leeway, client_id, audience, scope, redirect_uri, onStateChange }) {
-    if (CURRENT_CLIENT) Log.error("There can be only one");
-    CURRENT_CLIENT = this;
+    if (Auth0Client.CLIENT) Log.error("There can be only one");
+    Auth0Client.CLIENT = this;
     this.options = { leeway, client_id, audience, scope, redirect_uri };
     this.authorizeSilentlyWorks = true;  //optimism
     this.cache = new Cache({name: "auth0.client", onStateChange});
-    this.transactionManager = new TransactionManager();
+    this.authenticateCallbackState = new Cache({name: "auth0.client.callback"});
     this.domainUrl = "https://" + domain;
   }
 
@@ -111,7 +109,8 @@ class Auth0Client {
           telemetry,
         }
       });
-      this.transactionManager.create(state, {
+      this.authenticateCallbackState.set({
+        state,
         nonce,
         code_verifier,
         audience,  // FOR RECOVERY LATER
@@ -127,10 +126,9 @@ class Auth0Client {
 
   /**
    * If there's a valid token stored, return it. Otherwise, opens an
-   * iframe with the `/authorize` URL using the parameters provided
-   * as arguments. Random and secure `state` and `nonce` parameters
-   * will be auto-generated. If the response is successful, results
-   * will be valid according to their expiration times.
+   * iframe with the `/authorize` URL.  If that fails, open a new
+   * window to allow user to login. Cross-tab state will ensure the
+   * original page gets updated when logged back in.
    */
   async authorizeSilently() {
     if (Date.now().unix() < this.cache.get("decodedAccessToken.claims.exp")) return;
@@ -230,6 +228,8 @@ class Auth0Client {
 }
 
 async function newInstance({onStateChange, ...options}) {
+  if (exists(Auth0Client.CLIENT)) return Auth0Client.CLIENT;
+
   if (!window.crypto && (window).msCrypto) {
     (window).crypto = (window).msCrypto;
   }
@@ -249,7 +249,7 @@ async function newInstance({onStateChange, ...options}) {
   const location = window.location.origin + options.home_path;
   const redirect_uri = options.redirect_uri || window.location.origin+window.location.pathname;
   if (redirect_uri !== location){
-    Log.error("expecting SPA to be located at {{location}}", {location})
+    Log.error("expecting this SPA to be located at {{location}}", {location})
   }
 
   const { state, code, error, error_description } = fromQueryString(window.location.search);
@@ -270,11 +270,11 @@ async function newInstance({onStateChange, ...options}) {
 
   if (exists(state) && exists(code)){
     // THIS MAY BE A CALLBACK, AND WE CAN RECOVER THE AUTH STATE
-    const transaction = auth0.transactionManager.get(state);
+    const transaction = auth0.authenticateCallbackState.get();
     if (transaction){
       auth0.options.audience = transaction.audience;
       auth0.options.scope = transaction.scope;
-      auth0.transactionManager.remove(state);
+      auth0.authenticateCallbackState.clear();
       await auth0.verifyAuthorizeCode({code, ...transaction});
     }
     window.history.replaceState(null, null, location);
@@ -283,6 +283,7 @@ async function newInstance({onStateChange, ...options}) {
   return auth0;
 }
 
+Auth0Client.CLIENT = null;
 Auth0Client.newInstance = newInstance;
 
 export { Auth0Client}

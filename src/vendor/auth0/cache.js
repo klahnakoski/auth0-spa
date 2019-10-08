@@ -1,7 +1,7 @@
 import {sleep} from "../signals";
 import {json2value, value2json} from "../convert";
 import {GMTDate as Date} from "../dates";
-import {missing} from "../utils";
+import {missing, coalesce} from "../utils";
 import {Data} from "../datas";
 import {Log} from "../logs";
 
@@ -12,18 +12,18 @@ class Cache {
         this.name = name;
         this.value = null;
         this.timestamp = 0;
-        this.onStateChange = onStateChange;  // function called when external change happened
-
-        // this.onStateChange = coalesce(onStateChange, () => 0);  // function called when external change happened
+        this.onStateChange = coalesce(onStateChange, () => 0);  // function called when external change happened
         this.updater();
     }
 
     async updater(pleaseStop) {
         while (true) {
-            await sleep(1000);
             const {name} = this;
             const timestamp = json2value(ls.getItem(name + ".timestamp"));
-            if (this.timestamp === timestamp) continue;
+            if (this.timestamp === timestamp){
+                await sleep(1000);
+                continue;
+            }
 
             if (this.timestamp > timestamp) {
                 //update storage with newer value
