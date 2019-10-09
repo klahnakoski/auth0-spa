@@ -115,11 +115,14 @@ const fetchJson = async (url, options = {}) => {
       return null;
     }
 
+
     if (!response.ok) {
-      Log.error('{{status}} when calling {{url}}', {
+      const details = await response.json();
+      Log.error('{{status}} when calling {{url}}: {{details|json}}', {
         url,
         status: response.status,
-      });
+        details
+    });
     }
 
     const content = await response.text();

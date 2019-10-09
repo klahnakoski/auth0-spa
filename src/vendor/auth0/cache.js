@@ -27,7 +27,7 @@ class Cache {
 
             if (this.timestamp > timestamp) {
                 //update storage with newer value
-                this._push();
+                this._pushToStorage();
             } else {
                 // let storage update this.value
                 this.timestamp = timestamp;
@@ -44,7 +44,8 @@ class Cache {
     set(value) {
         this.timestamp = Date.now().unix();
         this.value = value;
-        this._push();
+        this._pushToStorage();
+        this.onStateChange();
     }
 
 
@@ -53,7 +54,7 @@ class Cache {
         return Data.get(this.value, path);
     }
 
-    _push() {
+    _pushToStorage() {
         ls.setItem(this.name + ".timestamp", value2json(this.timestamp));
         ls.setItem(this.name + ".value", value2json(this.value));
     }
@@ -61,7 +62,8 @@ class Cache {
     clear() {
         this.timestamp = Date.now().unix();
         this.value = null;
-        this._push();
+        this._pushToStorage();
+        this.onStateChange();
     }
 
 }

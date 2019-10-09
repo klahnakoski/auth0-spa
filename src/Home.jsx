@@ -8,25 +8,7 @@ import config from './config.json';
 import {decode as decodeJwt} from "./vendor/auth0/jwt";
 import {missing} from "./vendor/utils";
 import {GMTDate as Date} from "./vendor/dates";
-
-
-const dateFormat = (unix) => {
-    const d = Date.newInstance(unix);
-    return d && d.format('yyyy-MM-dd HH:mm:ss');
-};
-
-const decodeToken = (token) => {
-    if (missing(token)) return null;
-
-    if (!token.includes(".")) return token;
-    const expand = decodeJwt(token);
-
-    expand.claims._expiry = dateFormat(expand.claims.exp);
-    expand.claims._issued = dateFormat(expand.claims.iat);
-    expand.claims._not_before = dateFormat(expand.claims.nbf);
-    return value2json(expand);
-};
-
+import {QRCode} from "./vendor/auth0/qr";
 
 class Home extends React.Component {
 
@@ -36,7 +18,8 @@ class Home extends React.Component {
             auth0: null,
             user: null,
             token: null,
-            error: null
+            error: null,
+            qr: null,
         };
     }
 
@@ -57,19 +40,31 @@ class Home extends React.Component {
 
         // update() is run multiple times, be sure we do not make multiple auth0
         const auth0 = await Auth0Client.newInstance({...initOptions, onStateChange: () => this.update()});
-        const user = auth0.getUser();
+        const user = auth0.getIdToken();
         const token = auth0.getAccessToken();
         this.setState({auth0, user, token});
 
     }
 
+    async apiPublic(){
+        try{
+            const response = await fetchJson("http://localhost:5000/api/public");
+            this.setState({response});
+        } catch (error) {
+            this.setState({response: error});
+        }
+    }
+
     async apiScope(){
         try{
+            const token = this.state.auth0.getRawAccessToken();
+            if (!token) Log.error("not access token");
+
             const response = await fetchJson(
                 "http://localhost:5000/api/private-scoped",
                 {
                     headers: {
-                        Authorization: "Bearer " + this.state.auth0.getAccessToken()
+                        Authorization: "Bearer " + token
                     }
                 },
             );
@@ -81,11 +76,14 @@ class Home extends React.Component {
 
     async apiPrivate(){
         try {
+            const token = this.state.auth0.getRawAccessToken();
+            if (!token) Log.error("not access token");
+
             const response = await fetchJson(
                 "http://localhost:5000/api/private",
                 {
                     headers: {
-                        Authorization: "Bearer " + this.state.auth0.getAccessToken()
+                        Authorization: "Bearer " + token
                     }
                 },
             );
@@ -120,8 +118,16 @@ class Home extends React.Component {
         }
     }
 
+    async device(){
+        try {
+            this.setState({qr: <QRCode auth0={this.state.auth0}/>});
+        }catch (error) {
+            this.setState({response: error});
+        }
+    }
+
     render() {
-        const {auth0, user, error, response} = this.state;
+        const {auth0, user, qr, error, response} = this.state;
         if (error){
             return (<pre>{value2json(error)}</pre>);
         }
@@ -129,30 +135,54 @@ class Home extends React.Component {
             return (<div>WAIT</div>);
         }
         if (!user) {
-            return (<button onClick={() => auth0.authorizeWithRedirect({
-                audience:"https://locahost/query",
-                scope:"query:send"
-            })}>LOGIN</button>);
+            if (qr){
+                return qr;
+            }
+            return (<div>
+                <button onClick={() => auth0.authorizeWithRedirect({
+                    audience:"https://locahost/query",
+                    scope:"query:send"
+                })}>LOGIN</button>
+                &nbsp;
+                <button onClick={()=>this.device()}>DEVICE LOGIN</button>
+            </div>);
         }
         const accessToken = auth0.getAccessToken();
         const refreshToken = auth0.getRefreshToken();
-        return <div>
+        return (<div>
             <h2>Actions</h2>
-            <button onClick={() => auth0.logout()}>LOGOUT</button>&nbsp;
-            <button onClick={() => this.reauth()}>REFRESH AUTHORIZE</button>&nbsp;
-            <button onClick={() => this.refresh()}>REFRESH ACCESS TOKEN</button>&nbsp;
-            <button onClick={() => this.revoke()}>REVOKE REFRESH TOKEN</button>&nbsp;
-            <button onClick={() => this.apiPrivate()}>PRIVATE API REQUEST</button>&nbsp;
-            <button onClick={() => this.apiScope()}>SCOPE API REQUEST</button>&nbsp;
-            <h2>API Response</h2>
-            {response && (<pre>{value2json(response)}</pre>)}
-            <h2>RefreshToken</h2>
-            {refreshToken && (<pre>{decodeToken(refreshToken)}</pre>)}
-            <h2>AccessToken</h2>
-            {accessToken && (<pre>{decodeToken(accessToken)}</pre>)}
-            <h2>User</h2>
-            {user && (<pre>{value2json(user)}</pre>)}
-        </div>;
+            <button onClick={() => auth0.logout()}>LOGOUT</button>
+            <br/>
+            <button onClick={() => this.apiPublic()}>PUBLIC API REQUEST</button>
+            &nbsp;
+            <button onClick={() => this.apiPrivate()}>PRIVATE API REQUEST</button>
+            &nbsp;
+            <button onClick={() => this.apiScope()}>SCOPE API REQUEST</button>
+            {response && (<div>
+                <h2>API Response</h2>
+                <pre>{value2json(response)}</pre>
+            </div>)}
+            {refreshToken && (<div>
+                <h2>Refresh Token</h2>
+                <button onClick={() => this.refresh()}>USE REFRESH TOKEN FOR NEW ACCESS TOKEN</button>
+                &nbsp;
+                <button onClick={() => this.revoke()}>REVOKE REFRESH TOKEN</button>
+                &nbsp;
+                <pre>{value2json(refreshToken)}</pre>
+            </div>)}
+            {accessToken && (<div>
+                <h2>Access Token</h2>
+                <button onClick={() => this.reauth()}>REFRESH AUTHORIZE</button>
+                <br/>
+                <pre>{value2json(accessToken)}</pre>
+
+            </div>)}
+            {user && (<div>
+                <h2>ID Token</h2>
+                <pre>{value2json(user)}</pre>
+
+            </div>)}
+        </div>);
     }
 
 }

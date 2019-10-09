@@ -6,10 +6,10 @@ import {exists} from "../utils";
 import {bytesToBase64URL, value2json} from "../convert";
 import {Cache} from "./cache";
 import {GMTDate as Date} from "../dates";
+import {sleep, Signal, Timer} from "../signals";
 
 // use {"scope": "offline_access"} to turn on refresh tokens
 const DEFAULT_SCOPE = 'openid profile email';
-
 
 /**
  * A inter-session auth0 interface object
@@ -17,7 +17,7 @@ const DEFAULT_SCOPE = 'openid profile email';
  */
 class Auth0Client {
 
-  constructor({ domain, leeway, client_id, audience, scope, redirect_uri, onStateChange }) {
+  constructor({ domain, leeway=10, client_id, audience, scope, redirect_uri, onStateChange }) {
     if (Auth0Client.CLIENT) Log.error("There can be only one");
     Auth0Client.CLIENT = this;
     this.options = { leeway, client_id, audience, scope, redirect_uri };
@@ -27,16 +27,17 @@ class Auth0Client {
     this.domainUrl = "https://" + domain;
   }
 
-  getUser(){
-    return this.cache.get("decodedIdToken.user");
-  }
-
-  getIdTokenClaims() {
-    return this.cache.get("decodedIdToken.claims");
+  getRawAccessToken() {
+    const {header, payload, signature} = this.cache.get("access_token.encoded");
+    return header + "." + payload + "." + signature;
   }
 
   getAccessToken(){
     return this.cache.get("access_token");
+  }
+
+  getIdToken(){
+    return this.cache.get("id_token");
   }
 
   getRefreshToken(){
@@ -81,7 +82,7 @@ class Auth0Client {
 
   /**
    * Performs a redirect to `/authorize` using the parameters
-   * Random and secure `state` and `nonce` parameters will be
+   * Records state `.Random and secure `state` and `nonce` parameters will be
    * auto-generated, and recorded for eventual callback processing
    */
   async authorizeWithRedirect(){
@@ -131,7 +132,7 @@ class Auth0Client {
    * original page gets updated when logged back in.
    */
   async authorizeSilently() {
-    if (Date.now().unix() < this.cache.get("decodedAccessToken.claims.exp")) return;
+    if (Date.now().unix() < this.cache.get("access_token.claims.exp")) return;
 
     const { client_id, audience, scope, redirect_uri, telemetry } = this.options;
 
@@ -173,11 +174,100 @@ class Auth0Client {
     window.open(url, '_blank');
   }
 
+
+  /**
+   * Performs a device authentication flow
+   * https://auth0.com/docs/flows/concepts/device-auth
+   * It will provide a URL for another device to perform the authentication
+   */
+  async authorizeWithDevice() {
+    const {client_id, audience, scope} = this.options;
+    const {
+      device_code,
+      user_code,
+      verification_uri,
+      verification_uri_complete,
+      expires_in,
+      interval
+    } = await fetchJson(
+        this.domainUrl + "/oauth/device/code",
+        {
+          method: 'POST',
+          headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+          body: toQueryString({
+            client_id,
+            audience,
+            scope
+          })
+        }
+    );
+
+    const isDone = this._pollForDeviceResponse({device_code, expires_in, interval});
+    return {user_code, verification_uri, verification_uri_complete, isDone};
+  }
+
+  /*
+  start polling for access token
+  return a promise, which will resolve when tokens are acquired
+   */
+  _pollForDeviceResponse({device_code, expires_in, interval}){
+    //POLL FOR RESPONSE
+    const isDone = new Signal();
+    (async () => {
+      const {client_id, audience, scope} = this.options;
+      const timeout = new Timer(Date.now().addSecond(expires_in));
+      try {
+        while (!timeout.done) {
+          await sleep(interval * 1000);
+
+          try {
+            const authResult = await fetchJson(
+                this.domainUrl + "/oauth/token",
+                {
+                  method: 'POST',
+                  headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                  body: toQueryString({
+                    grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+                    client_id,
+                    device_code,
+                  })
+                }
+            );
+            this._setResult(authResult);
+            return;
+          } catch (e) {
+            const {error, description} = e.cause.props.details;
+
+            if (error === "authorization_pending") {
+              continue;
+            }
+            if (error === "slow_down") {
+              //DOUBLE THE SLEEP TIME
+              await sleep(interval * 1000);
+              continue;
+            }
+            if (error === "expired_token") {
+              Log.error("Device auth opportunity timed out: {{description}}", {description});
+            }
+            if (error === "access_denied") {
+              Log.error("Device auth broken in some way: {{description}}", {description});
+            }
+            Log.warning("Do not know what to do: {{description}}", {description});
+          }
+        }
+     }finally{
+        isDone.go();
+      }
+    })();
+    return isDone;
+
+  };
+
   /*
   After user authentication, call back to auth0 to get all the
   tokens.  Verify the id token.
    */
-  async verifyAuthorizeCode({code_verifier, nonce, code}){
+  async verifyAuthorizeCode({code_verifier, nonce, code}) {
     const {leeway, client_id, redirect_uri, audience, scope} = this.options;
     const authResult = await fetchJson(
         this.domainUrl + "/oauth/token",
@@ -194,23 +284,28 @@ class Auth0Client {
         }
     );
 
-    const {id_token} = authResult;
-    const decodedAccessToken = decodeJwt(authResult.access_token);
-    const decodedIdToken = verifyIdToken({
-      iss: this.domainUrl + "/",
-      aud: client_id,
-      id_token,
-      nonce,
-      leeway: leeway
-    });
+    this._setResult(authResult);
+  }
+
+  _setResult(authResult){
+    const {leeway, audience, scope} = this.options;
+
+    const {id_token: rawIdToken, access_token:rawAccessToken, expires_in, ...result} = authResult;
+    const access_token = decodeJwt(rawAccessToken, leeway);
+    const id_token = decodeJwt(rawIdToken, leeway);
 
     this.cache.set({
-      ...authResult,
-      decodedAccessToken,
-      decodedIdToken,
+      ...result,
+      access_token,
+      id_token,
       audience,
       scope
     });
+
+    new Timer(new Date(access_token.claims.exp * 1000)).then(
+        ()=>this.cache.clear()
+    );
+
   }
 
   /**

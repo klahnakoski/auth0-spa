@@ -1,4 +1,5 @@
 import {Log} from "./logs";
+import {GMTDate} from "./dates";
 
 function sleep(ms) {
     return new Promise((resolve) => {
@@ -23,7 +24,7 @@ const delayedValue = () => {
 };
 
 /*
-Binary, unidiretional, signal
+Binary, unidirectional, signal
 Signal starts as `false` and can be triggered to be `true`, it can not go back to `false`.
 use `go()` to trigger the signal
 attach dependnecies to signal, or wait on signal to continue async functions.
@@ -31,20 +32,21 @@ attach dependnecies to signal, or wait on signal to continue async functions.
 class Signal {
 
     constructor(){
-        this.go = false;
+        this.done = false;
         this._waiting = [];
     }
 
     valueOf(){
-        return this.go;
+        return this.done;
     }
 
     /*
     Execute `func` when signalled, once and only once.
     If already signalled, then `func` is executed immediately
+    Each call to then() adds to the list of work to be done
      */
     then(func){
-        if (this.go){
+        if (this.done){
             func();
         }else{
             this._waiting.push(func);
@@ -55,23 +57,22 @@ class Signal {
     Trigger this signal
      */
     go(){
-        if (this.go) return;
+        if (this.done) return;
+        this.done = true;
 
-        this.go = true;
-        const waiting = this._waiting;
-        this._waiting = [];
-
-        waiting.forEach(func=>{
+        this._waiting.forEach(func=>{
             try {
                 func()
             }catch(e){
                 Log.warning("failure during execution of function", e)
             }
         });
+        this._waiting = [];
     }
 
     /*
     Let async function sleep until signalled
+    return a Promise that will resolve when signalled
 
     ```
         const s = new Signal();
@@ -80,7 +81,6 @@ class Signal {
     ```
      */
     async wait(){
-        // return a Promise that will resolve when signalled
         return new Promise((resolve) => {
             this._waiting.push(resolve);
         });
@@ -92,9 +92,15 @@ class Signal {
 A signal based on a timeout
  */
 class Timer extends Signal {
-    constructor(timeout){
+    constructor(timeout) {
         super();
-        setTimeout(this.go, timeout);
+        let timer;
+        if (timeout instanceof GMTDate) {
+            timer = setTimeout(()=>this.go(), (timeout.unix()-GMTDate.now().unix())*1000);
+        } else {
+            timer = setTimeout(()=>this.go(), timeout*1000);
+        }
+        this.then(() => clearTimeout(timer));
     }
 }
 
