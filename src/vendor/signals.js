@@ -29,13 +29,11 @@ Signal starts as `false` and can be triggered to be `true`, it can not go back t
 use `go()` to trigger the signal
 attach dependnecies to signal, or wait on signal to continue async functions.
  */
-class Signal extends Promise{
+class Signal {
 
     constructor(){
-        super((resolve) => {
-            this._resolve = resolve;
-        });
         this.done = false;
+        this._waiting = [];
     }
 
     valueOf(){
@@ -48,13 +46,11 @@ class Signal extends Promise{
     Each call to then() adds to the list of work to be done
      */
     then(func){
-        super.then(()=>{
-            try {
-                func()
-            }catch(e){
-                Log.warning("failure during execution of function", e)
-            }
-        });
+        if (this.done){
+            func();
+        }else{
+            this._waiting.push(func);
+        }
     }
 
     /*
@@ -63,7 +59,15 @@ class Signal extends Promise{
     go(){
         if (this.done) return;
         this.done = true;
-        this._resolve();
+
+        this._waiting.forEach(func=>{
+            try {
+                func()
+            }catch(e){
+                Log.warning("failure during execution of function", e)
+            }
+        });
+        this._waiting = [];
     }
 
     /*
@@ -77,7 +81,9 @@ class Signal extends Promise{
     ```
      */
     async wait(){
-        return this;
+        return new Promise((resolve) => {
+            this._waiting.push(resolve);
+        });
     }
 
 }
@@ -86,13 +92,13 @@ class Signal extends Promise{
 A signal based on a timeout
  */
 class Timer extends Signal {
-    constructor(timeout) {
+    constructor(timeoutInSeconds) {
         super();
         let timer;
-        if (timeout instanceof GMTDate) {
-            timer = setTimeout(()=>this.go(), (timeout.unix()-GMTDate.now().unix())*1000);
+        if (timeoutInSeconds instanceof GMTDate) {
+            timer = setTimeout(()=>this.go(), (timeoutInSeconds.unix()-GMTDate.now().unix())*1000);
         } else {
-            timer = setTimeout(()=>this.go(), timeout*1000);
+            timer = setTimeout(()=>this.go(), timeoutInSeconds*1000);
         }
         this.then(() => clearTimeout(timer));
     }
