@@ -82,8 +82,7 @@ class Auth0Client {
 
   /**
    * Performs a redirect to `/authorize` using the parameters
-   * Records state `.Random and secure `state` and `nonce` parameters will be
-   * auto-generated, and recorded for eventual callback processing
+   * Records state for eventual callback processing
    */
   async authorizeWithRedirect(){
     try {
@@ -126,9 +125,11 @@ class Auth0Client {
   };
 
   /**
-   * If there's a valid token stored, return it. Otherwise, opens an
-   * iframe with the `/authorize` URL.  If that fails, open a new
-   * window to allow user to login. Cross-tab state will ensure the
+   * If there's a valid token stored, do nothing.
+   * Otherwise, opens an iframe with the `/authorize` URL.
+   * If that fails, open a new window to allow user to login.
+   *
+   * Cross-tab state will ensure the
    * original page gets updated when logged back in.
    */
   async authorizeSilently() {
@@ -208,7 +209,7 @@ class Auth0Client {
 
   /*
   start polling for access token
-  return a promise, which will resolve when tokens are acquired
+  return a Signal, which will be triggered when tokens are acquired
    */
   _pollForDeviceResponse({device_code, expires_in, interval}){
     //POLL FOR RESPONSE

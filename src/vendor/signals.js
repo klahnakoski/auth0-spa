@@ -29,11 +29,13 @@ Signal starts as `false` and can be triggered to be `true`, it can not go back t
 use `go()` to trigger the signal
 attach dependnecies to signal, or wait on signal to continue async functions.
  */
-class Signal {
+class Signal extends Promise{
 
     constructor(){
+        super((resolve) => {
+            this._resolve = resolve;
+        });
         this.done = false;
-        this._waiting = [];
     }
 
     valueOf(){
@@ -46,11 +48,13 @@ class Signal {
     Each call to then() adds to the list of work to be done
      */
     then(func){
-        if (this.done){
-            func();
-        }else{
-            this._waiting.push(func);
-        }
+        super.then(()=>{
+            try {
+                func()
+            }catch(e){
+                Log.warning("failure during execution of function", e)
+            }
+        });
     }
 
     /*
@@ -59,15 +63,7 @@ class Signal {
     go(){
         if (this.done) return;
         this.done = true;
-
-        this._waiting.forEach(func=>{
-            try {
-                func()
-            }catch(e){
-                Log.warning("failure during execution of function", e)
-            }
-        });
-        this._waiting = [];
+        this._resolve();
     }
 
     /*
@@ -81,9 +77,7 @@ class Signal {
     ```
      */
     async wait(){
-        return new Promise((resolve) => {
-            this._waiting.push(resolve);
-        });
+        return this;
     }
 
 }
