@@ -5,9 +5,6 @@ import {value2json} from "./vendor/convert";
 import {fetchJson, fromQueryString} from "./vendor/requests";
 import {Auth0Client} from "./vendor/auth0/client";
 import config from './config.json';
-import {decode as decodeJwt} from "./vendor/auth0/jwt";
-import {missing} from "./vendor/utils";
-import {GMTDate as Date} from "./vendor/dates";
 import {QRCode} from "./vendor/auth0/qr";
 
 class Home extends React.Component {
