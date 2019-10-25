@@ -6,7 +6,7 @@ import { Duration } from './durations';
 import { GMTDate as Date } from './dates';
 import strings from './strings';
 import { Log } from './logs';
-import { leaves, toPairs } from './vectors';
+import {leaves, selectFrom, toPairs} from './vectors';
 import { KVStore } from './db_cache';
 import {sleep} from './signals';
 
@@ -126,6 +126,11 @@ const fetchJson = async (url, options = {}) => {
     }
 
     const content = await response.text();
+
+    response.headers.forEach((k,v)=>{
+      Log.note(k+"="+v);
+    });
+    Log.note("COOKIE: " + document.cookie);
 
     try {
       if (expire) {

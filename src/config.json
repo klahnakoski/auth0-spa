@@ -9,6 +9,12 @@
         "telemetry": {
             "url": "https://github.com/klahnakoski/auth0-spa"
         },
-        "cookie": {"name": "annotation_session"}
+        "api": {
+            "cookie": {
+                "name": "annotation_session"
+            },
+            "domain": "dev.localhost",
+            "authorize": "http://dev.localhost:5000/authorize"
+        }
     }
 }

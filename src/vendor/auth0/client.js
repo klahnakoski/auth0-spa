@@ -9,6 +9,7 @@ import {GMTDate as Date} from "../dates";
 import {Signal, sleep, Timer} from "../signals";
 import strings from "../strings";
 import {Data} from "../datas";
+import {toPairs} from "../vectors";
 
 // use {"scope": "offline_access"} to turn on refresh tokens
 const DEFAULT_SCOPE = 'openid profile email';
@@ -19,7 +20,7 @@ const DEFAULT_SCOPE = 'openid profile email';
  */
 class Auth0Client {
 
-  constructor({ domain, leeway=10, client_id, audience, scope, redirect_uri, onStateChange, cookie }) {
+  constructor({ domain, leeway=10, client_id, audience, scope, redirect_uri, onStateChange, cookie, api }) {
     if (Auth0Client.CLIENT) Log.error("There can be only one");
     Auth0Client.CLIENT = this;
     this.options = { leeway, client_id, audience, scope, redirect_uri };
@@ -27,8 +28,8 @@ class Auth0Client {
     this.cache = new Cache({name: "auth0.client", onStateChange});
     this.authenticateCallbackState = new Cache({name: "auth0.client.callback"});
     this.domainUrl = "https://" + domain;
-    this.cookieName = Data.get(cookie, "name");
-    if (!this.cookieName) Log.error("Expecting a cookie.name parameter")
+    this.api = api;
+    if (!this.api.cookie.name) Log.error("Expecting a cookie.name parameter")
   }
 
   async fetchJson(url, options={}){
@@ -43,12 +44,11 @@ class Auth0Client {
     }
 
     try {
-      return (await fetchJson(
-          "http://dev.localhost:5000/api/private",
-          options
-      ));
+      const response = await fetchJson(url, options);
+      const temp = response.headers;
+      return response;
     }catch (error) {
-      this.clearSession({domain:"dev.localhost"});
+      this.clearSession();
       throw error;
     }
   }
@@ -72,12 +72,32 @@ class Auth0Client {
   }
 
   getSession(){
-    return coalesce(...document.cookie.split(";").map(v=>strings.between(v, this.cookieName+"=")));
+    return coalesce(...document.cookie.split(";").map(v=>strings.between(v, this.api.cookie.name+"=")));
   }
 
-  clearSession({domain}){
+  setCookie(cookie){
+    const str = (v, k) => {
+      if (v === true) {
+        return k;
+      } else if (v === false) {
+        return "";
+      } else {
+        return k + "=" + v;
+      }
+    };
+    const {Domain, Path, Secure, HttpOnly, Expires, ...val} = cookie;
+    const rest = {Domain, Path, Secure, HttpOnly, Expires};
+
+    const cookie_text = toPairs(val).map(str).join(";")
+        + ";"
+        + toPairs(rest).map(str).filter(exists).join(";");
+    document.cookie = cookie_text;
+  }
+
+
+  clearSession(){
     // Set-Cookie: annotation_session=7e092d6a-0783-4922-9456-7b306360898b; Domain=dev.localhost; Expires=Mon, 25-Nov-2019 12:49:05 GMT; Path=/
-    document.cookie = this.cookieName + "=; max-age=0; Path=/" +(domain ? "; Domain="+domain : "");
+    document.cookie = this.api.cookie.name + "=;path=/;domain="+this.api.domain + ";expires=Thu, 01 Jan 1970 00:00:01 GMT";
   }
 
   async refreshAccessToken(){
@@ -270,7 +290,7 @@ class Auth0Client {
                   })
                 }
             );
-            this._setResult(authResult);
+            await this._setResult(authResult);
             return;
           } catch (e) {
             const {error, description} = e.cause.props.details;
@@ -321,10 +341,10 @@ class Auth0Client {
         }
     );
 
-    this._setResult(authResult);
+    await this._setResult(authResult);
   }
 
-  _setResult(authResult){
+  async _setResult(authResult){
     const {leeway, audience, scope} = this.options;
 
     const {id_token: rawIdToken, access_token:rawAccessToken, expires_in, ...result} = authResult;
@@ -339,6 +359,20 @@ class Auth0Client {
       scope
     });
 
+    // GO TO API TO GET A SESSION
+    try {
+      const api_cookie = await fetchJson(this.api.authorize, {
+        headers:{
+          Authorization:  "Bearer " + rawAccessToken
+        }
+      });
+
+      this.setCookie(api_cookie);
+    }catch (error) {
+      this.clearSession();
+      throw error;
+    }
+
     new Timer(new Date(access_token.claims.exp * 1000)).then(
         ()=>this.cache.clear()
     );
@@ -351,6 +385,7 @@ class Auth0Client {
    */
   async logout() {
     this.cache.clear();
+    this.clearSession();
     const {client_id, telemetry, redirect_uri} = this.options;
     window.location.assign(URL({
       path: this.domainUrl + "/v2/logout",
@@ -360,6 +395,10 @@ class Auth0Client {
 }
 
 async function newInstance({onStateChange, ...options}) {
+  /*
+  RESPONSIBLE FOR RECOVERING STATE OF PREVIOUS VISIT, OR
+  RETURNING A SINGLTON
+   */
   if (exists(Auth0Client.CLIENT)) return Auth0Client.CLIENT;
 
   if (!window.crypto && (window).msCrypto) {
