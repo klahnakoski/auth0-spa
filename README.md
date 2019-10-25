@@ -8,16 +8,21 @@ This SPA works with an API, which is found here: https://github.com/klahnakoski/
 
 ## Configuration
 
-The `config.json` file has been set so you can use this SPA served from localhost. An `audience` and `scope` have been set, and must match you API configuration at `auth0.com`.  
+The `config.json` file has been set so you can use this SPA served from `http://dev.localhost`. An `audience` and `scope` have been set, and must match you API configuration at `auth0.com`.  
 
 * Include `{"scope": "offline_access"}` to see how refresh tokens work
 * Exclude `scope` and `audience` to send opaque access tokens to API.
+
+> Be sure to add `dev.localhost` to you `hosts` file
+
+
 
 ## Features
 
 * Maintains its own state through redirects
 * Shares Access Token among tabs
 * Handles multiple scenarios access token scenarios
+* Transfers session to API session once API is contacted
 
 
 ## Code

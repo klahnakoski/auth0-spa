@@ -42,10 +42,15 @@ class Auth0Client {
       options.headers.Authorization = "Bearer " + token
     }
 
-    return (await fetchJson(
-        "http://dev.localhost:5000/api/private",
-        options
-    ));
+    try {
+      return (await fetchJson(
+          "http://dev.localhost:5000/api/private",
+          options
+      ));
+    }catch (error) {
+      this.clearSession({domain:"dev.localhost"});
+      throw error;
+    }
   }
 
 
@@ -68,6 +73,11 @@ class Auth0Client {
 
   getSession(){
     return coalesce(...document.cookie.split(";").map(v=>strings.between(v, this.cookieName+"=")));
+  }
+
+  clearSession({domain}){
+    // Set-Cookie: annotation_session=7e092d6a-0783-4922-9456-7b306360898b; Domain=dev.localhost; Expires=Mon, 25-Nov-2019 12:49:05 GMT; Path=/
+    document.cookie = this.cookieName + "=; max-age=0; Path=/" +(domain ? "; Domain="+domain : "");
   }
 
   async refreshAccessToken(){
