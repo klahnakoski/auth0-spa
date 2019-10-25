@@ -1,12 +1,14 @@
 import {createRandomString, runIframe, sha256, unionScopes} from './utils';
-import {decode as decodeJwt, verify as verifyIdToken} from './jwt';
+import {decode as decodeJwt} from './jwt';
 import {fetchJson, fromQueryString, toQueryString, URL} from '../requests';
 import {Log} from "../logs";
-import {exists} from "../utils";
+import {coalesce, exists} from "../utils";
 import {bytesToBase64URL, value2json} from "../convert";
 import {Cache} from "./cache";
 import {GMTDate as Date} from "../dates";
-import {sleep, Signal, Timer} from "../signals";
+import {Signal, sleep, Timer} from "../signals";
+import strings from "../strings";
+import {Data} from "../datas";
 
 // use {"scope": "offline_access"} to turn on refresh tokens
 const DEFAULT_SCOPE = 'openid profile email';
@@ -17,7 +19,7 @@ const DEFAULT_SCOPE = 'openid profile email';
  */
 class Auth0Client {
 
-  constructor({ domain, leeway=10, client_id, audience, scope, redirect_uri, onStateChange }) {
+  constructor({ domain, leeway=10, client_id, audience, scope, redirect_uri, onStateChange, cookie }) {
     if (Auth0Client.CLIENT) Log.error("There can be only one");
     Auth0Client.CLIENT = this;
     this.options = { leeway, client_id, audience, scope, redirect_uri };
@@ -25,7 +27,27 @@ class Auth0Client {
     this.cache = new Cache({name: "auth0.client", onStateChange});
     this.authenticateCallbackState = new Cache({name: "auth0.client.callback"});
     this.domainUrl = "https://" + domain;
+    this.cookieName = Data.get(cookie, "name");
+    if (!this.cookieName) Log.error("Expecting a cookie.name parameter")
   }
+
+  async fetchJson(url, options={}){
+    const session = this.getSession();
+    if (session) {
+      options.credentials = 'include';
+    } else {
+      const token = this.getRawAccessToken();
+      if (!token) Log.error("not access token");
+      options.headers = coalesce(options.headers, {});
+      options.headers.Authorization = "Bearer " + token
+    }
+
+    return (await fetchJson(
+        "http://dev.localhost:5000/api/private",
+        options
+    ));
+  }
+
 
   getRawAccessToken() {
     const {header, payload, signature} = this.cache.get("access_token.encoded");
@@ -42,6 +64,10 @@ class Auth0Client {
 
   getRefreshToken(){
     return this.cache.get("refresh_token");
+  }
+
+  getSession(){
+    return coalesce(...document.cookie.split(";").map(v=>strings.between(v, this.cookieName+"=")));
   }
 
   async refreshAccessToken(){

@@ -2,7 +2,7 @@ import React from "react";
 
 import {Log} from "./vendor/logs";
 import {value2json} from "./vendor/convert";
-import {fetchJson, fromQueryString} from "./vendor/requests";
+import {fromQueryString} from "./vendor/requests";
 import {Auth0Client} from "./vendor/auth0/client";
 import config from './config.json';
 import {QRCode} from "./vendor/auth0/qr";
@@ -14,6 +14,7 @@ class Home extends React.Component {
         this.state = {
             auth0: null,
             user: null,
+            cookie: null,
             token: null,
             error: null,
             qr: null,
@@ -39,14 +40,15 @@ class Home extends React.Component {
         const auth0 = await Auth0Client.newInstance({...initOptions, onStateChange: () => this.update()});
         const user = auth0.getIdToken();
         const token = auth0.getAccessToken();
-        this.setState({auth0, user, token});
-
+        const cookie = auth0.getSession();
+        this.setState({auth0, user, token, cookie});
     }
 
     async apiPublic(){
         try{
-            const response = await fetchJson("http://localhost:5000/api/public");
-            this.setState({response});
+            const response = await this.state.auth0.fetchJson("http://dev.localhost:5000/api/public");
+            const cookie = this.state.auth0.getSession();
+            this.setState({response, cookie});
         } catch (error) {
             this.setState({response: error});
         }
@@ -54,18 +56,9 @@ class Home extends React.Component {
 
     async apiScope(){
         try{
-            const token = this.state.auth0.getRawAccessToken();
-            if (!token) Log.error("not access token");
-
-            const response = await fetchJson(
-                "http://localhost:5000/api/private-scoped",
-                {
-                    headers: {
-                        Authorization: "Bearer " + token
-                    }
-                },
-            );
-            this.setState({response});
+            const response = await this.state.auth0.fetchJson("http://dev.localhost:5000/api/private-scoped");
+            const cookie = this.state.auth0.getSession();
+            this.setState({response, cookie});
         } catch (error) {
             this.setState({response: error});
         }
@@ -73,18 +66,9 @@ class Home extends React.Component {
 
     async apiPrivate(){
         try {
-            const token = this.state.auth0.getRawAccessToken();
-            if (!token) Log.error("not access token");
-
-            const response = await fetchJson(
-                "http://localhost:5000/api/private",
-                {
-                    headers: {
-                        Authorization: "Bearer " + token
-                    }
-                },
-            );
-            this.setState({response});
+            const response = await this.state.auth0.fetchJson("http://dev.localhost:5000/api/private");
+            const cookie = this.state.auth0.getSession();
+            this.setState({response, cookie});
         }catch (error) {
             this.setState({response: error});
         }
@@ -124,14 +108,14 @@ class Home extends React.Component {
     }
 
     render() {
-        const {auth0, user, qr, error, response} = this.state;
+        const {auth0, user, token, cookie, qr, error, response} = this.state;
         if (error){
             return (<pre>{value2json(error)}</pre>);
         }
         if (!auth0) {
             return (<div>WAIT</div>);
         }
-        if (!user) {
+        if (!cookie && !token){
             if (qr){
                 return qr;
             }
@@ -144,7 +128,6 @@ class Home extends React.Component {
                 <button onClick={()=>this.device()}>DEVICE LOGIN</button>
             </div>);
         }
-        const accessToken = auth0.getAccessToken();
         const refreshToken = auth0.getRefreshToken();
         return (<div>
             <h2>Actions</h2>
@@ -167,11 +150,16 @@ class Home extends React.Component {
                 &nbsp;
                 <pre>{value2json(refreshToken)}</pre>
             </div>)}
-            {accessToken && (<div>
+            {cookie && (<div>
+                <h2>Session Cookie</h2>
+                <pre>{value2json(cookie)}</pre>
+
+            </div>)}
+            {token && (<div>
                 <h2>Access Token</h2>
                 <button onClick={() => this.reauth()}>REFRESH AUTHORIZE</button>
                 <br/>
-                <pre>{value2json(accessToken)}</pre>
+                <pre>{value2json(token)}</pre>
 
             </div>)}
             {user && (<div>

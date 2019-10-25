@@ -5,8 +5,10 @@
         "home_path": "/home",
         "audience": "https://locahost/query",
         "scope": "data:change",
+        "other scopes": "offline_access openid profile email",
         "telemetry": {
             "url": "https://github.com/klahnakoski/auth0-spa"
-        }
+        },
+        "cookie": {"name": "annotation_session"}
     }
 }
