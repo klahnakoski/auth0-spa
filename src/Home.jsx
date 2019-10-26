@@ -40,14 +40,14 @@ class Home extends React.Component {
         const auth0 = await Auth0Client.newInstance({...initOptions, onStateChange: () => this.update()});
         const user = auth0.getIdToken();
         const token = auth0.getAccessToken();
-        const cookie = auth0.getSession();
+        const cookie = auth0.getCookie();
         this.setState({auth0, user, token, cookie});
     }
 
     async apiPublic(){
         try{
             const response = await this.state.auth0.fetchJson("http://dev.localhost:5000/api/public");
-            const cookie = this.state.auth0.getSession();
+            const cookie = this.state.auth0.getCookie();
             this.setState({response, cookie});
         } catch (error) {
             this.setState({response: error});
@@ -57,7 +57,7 @@ class Home extends React.Component {
     async apiScope(){
         try{
             const response = await this.state.auth0.fetchJson("http://dev.localhost:5000/api/private-scoped");
-            const cookie = this.state.auth0.getSession();
+            const cookie = this.state.auth0.getCookie();
             this.setState({response, cookie});
         } catch (error) {
             this.setState({response: error});
@@ -67,7 +67,7 @@ class Home extends React.Component {
     async apiPrivate(){
         try {
             const response = await this.state.auth0.fetchJson("http://dev.localhost:5000/api/private");
-            const cookie = this.state.auth0.getSession();
+            const cookie = this.state.auth0.getCookie();
             this.setState({response, cookie});
         }catch (error) {
             this.setState({response: error});

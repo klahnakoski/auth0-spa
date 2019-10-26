@@ -4,8 +4,8 @@
         "client_id": "FYlBPbNm7vZi9YPwVFyR7J2TLKrzNtST",
         "home_path": "/home",
         "audience": "https://locahost/query",
-        "scope": "data:change",
-        "other scopes": "offline_access openid profile email",
+        "scope": "openid email query:send",
+        "other scopes": "offline_access openid profile email data:change query:send",
         "telemetry": {
             "url": "https://github.com/klahnakoski/auth0-spa"
         },
@@ -14,7 +14,9 @@
                 "name": "annotation_session"
             },
             "domain": "dev.localhost",
-            "authorize": "http://dev.localhost:5000/authorize"
+            "login": "http://dev.localhost:5000/authorize",
+            "logout": "http://dev.localhost:5000/logout",
+            "keep_alive": "http://dev.localhost:5000/ping"
         }
     }
 }

@@ -2,17 +2,14 @@ import {createRandomString, runIframe, sha256, unionScopes} from './utils';
 import {decode as decodeJwt} from './jwt';
 import {fetchJson, fromQueryString, toQueryString, URL} from '../requests';
 import {Log} from "../logs";
-import {coalesce, exists} from "../utils";
+import {exists} from "../utils";
 import {bytesToBase64URL, value2json} from "../convert";
 import {Cache} from "./cache";
 import {GMTDate as Date} from "../dates";
 import {Signal, sleep, Timer} from "../signals";
-import strings from "../strings";
-import {Data} from "../datas";
 import {toPairs} from "../vectors";
 
-// use {"scope": "offline_access"} to turn on refresh tokens
-const DEFAULT_SCOPE = 'openid profile email';
+const DEFAULT_SCOPE = '';
 
 /**
  * A inter-session auth0 interface object
@@ -20,8 +17,10 @@ const DEFAULT_SCOPE = 'openid profile email';
  */
 class Auth0Client {
 
-  constructor({ domain, leeway=10, client_id, audience, scope, redirect_uri, onStateChange, cookie, api }) {
+  constructor({ domain, leeway=10, client_id, audience, scope, redirect_uri, onStateChange, api }) {
     if (Auth0Client.CLIENT) Log.error("There can be only one");
+    if (!api.cookie.name) Log.error("Expecting a cookie.name parameter");
+
     Auth0Client.CLIENT = this;
     this.options = { leeway, client_id, audience, scope, redirect_uri };
     this.authorizeSilentlyWorks = true;  //optimism
@@ -29,30 +28,28 @@ class Auth0Client {
     this.authenticateCallbackState = new Cache({name: "auth0.client.callback"});
     this.domainUrl = "https://" + domain;
     this.api = api;
-    if (!this.api.cookie.name) Log.error("Expecting a cookie.name parameter")
+    this.cookie = null;
+    this.keep_alive_daemon(false);
   }
 
   async fetchJson(url, options={}){
-    const session = this.getSession();
-    if (session) {
-      options.credentials = 'include';
-    } else {
-      const token = this.getRawAccessToken();
-      if (!token) Log.error("not access token");
-      options.headers = coalesce(options.headers, {});
-      options.headers.Authorization = "Bearer " + token
+    const now = Date.now().unix();
+    const session = this.getCookie();
+    if (!session) {
+      Log.error("require session to call api");
     }
+    options.credentials = 'include';
 
     try {
       const response = await fetchJson(url, options);
-      const temp = response.headers;
+      this.last_used = now;
       return response;
     }catch (error) {
-      this.clearSession();
+      this.clearCookie();
       throw error;
+    }finally {
     }
   }
-
 
   getRawAccessToken() {
     const {header, payload, signature} = this.cache.get("access_token.encoded");
@@ -71,8 +68,8 @@ class Auth0Client {
     return this.cache.get("refresh_token");
   }
 
-  getSession(){
-    return coalesce(...document.cookie.split(";").map(v=>strings.between(v, this.api.cookie.name+"=")));
+  getCookie(){
+    return this.cookie;
   }
 
   setCookie(cookie){
@@ -85,19 +82,20 @@ class Auth0Client {
         return k + "=" + v;
       }
     };
-    const {Domain, Path, Secure, HttpOnly, Expires, ...val} = cookie;
-    const rest = {Domain, Path, Secure, HttpOnly, Expires};
-
-    const cookie_text = toPairs(val).map(str).join(";")
-        + ";"
+    const {domain, path, secure, httponly, expires, name, value} = cookie;
+    const rest = {domain, path, secure, httponly, expires};
+    const cookie_text = name + "=" + value + ";"
         + toPairs(rest).map(str).filter(exists).join(";");
+    this.cookie = cookie;
     document.cookie = cookie_text;
   }
 
-
-  clearSession(){
+  clearCookie(){
     // Set-Cookie: annotation_session=7e092d6a-0783-4922-9456-7b306360898b; Domain=dev.localhost; Expires=Mon, 25-Nov-2019 12:49:05 GMT; Path=/
-    document.cookie = this.api.cookie.name + "=;path=/;domain="+this.api.domain + ";expires=Thu, 01 Jan 1970 00:00:01 GMT";
+    if (this.cookie) {
+      document.cookie = this.cookie.name + "=;path=" + this.cookie.path + ";domain=" + this.cookie.domain + ";expires=Thu, 01 Jan 1970 00:00:01 GMT";
+    }
+    this.cookie = null;
   }
 
   async refreshAccessToken(){
@@ -349,7 +347,10 @@ class Auth0Client {
 
     const {id_token: rawIdToken, access_token:rawAccessToken, expires_in, ...result} = authResult;
     const access_token = decodeJwt(rawAccessToken, leeway);
-    const id_token = decodeJwt(rawIdToken, leeway);
+    let id_token = null;
+    if (rawIdToken){
+      id_token = decodeJwt(rawIdToken, leeway);
+    }
 
     this.cache.set({
       ...result,
@@ -359,19 +360,7 @@ class Auth0Client {
       scope
     });
 
-    // GO TO API TO GET A SESSION
-    try {
-      const api_cookie = await fetchJson(this.api.authorize, {
-        headers:{
-          Authorization:  "Bearer " + rawAccessToken
-        }
-      });
-
-      this.setCookie(api_cookie);
-    }catch (error) {
-      this.clearSession();
-      throw error;
-    }
+    await this.login({rawAccessToken});
 
     new Timer(new Date(access_token.claims.exp * 1000)).then(
         ()=>this.cache.clear()
@@ -379,20 +368,55 @@ class Auth0Client {
 
   }
 
-  /**
-   * Performs a redirect to `/v2/logout` using the parameters provided
-   * as arguments. [Read more about how Logout works at Auth0](https://auth0.com/docs/logout).
-   */
+  async login({rawAccessToken}){
+    /*
+    GO TO API TO GET A SESSION
+     */
+    try {
+      const api_cookie = await fetchJson(this.api.login, {
+        headers:{
+          Authorization:  "Bearer " + rawAccessToken
+        }
+      });
+
+      this.setCookie(api_cookie);
+    }catch (error) {
+      this.clearCookie();
+      throw error;
+    }
+  }
+
+  async keep_alive_daemon(pleaseStop){
+    /*
+    KEEP SESSION COOKIE ALIVE BY PINGING THE API 2MIN BEFORE EXPIRY
+     */
+    while (!pleaseStop){
+      const now = Date.now().unix();
+      if (this.cookie && now > this.last_used + this.cookie.inactive_lifetime - 120) {
+        try {
+          await this.fetchJson(this.api.keepalive);
+        }catch (e) {
+          Log.warning("Can not keep session alive", e);
+        }
+      }
+      await sleep(15);
+    }
+  }
+
   async logout() {
+    /*
+    INVALIDATE THE SESSION COOKIE
+     */
+    try {
+      await fetchJson(this.api.logout);
+    }catch (e) {
+      Log.warning("problem calling logout endpoint", e);
+    }
     this.cache.clear();
-    this.clearSession();
-    const {client_id, telemetry, redirect_uri} = this.options;
-    window.location.assign(URL({
-      path: this.domainUrl + "/v2/logout",
-      query: {client_id, telemetry, returnTo: redirect_uri}
-    }));
+    this.clearCookie();
   }
 }
+
 
 async function newInstance({onStateChange, ...options}) {
   /*
