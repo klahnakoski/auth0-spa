@@ -15,6 +15,16 @@ The `config.json` file has been set so you can use this SPA served from `http://
 
 > Be sure to add `dev.localhost` to you `hosts` file
 
+## Execution
+
+Be sure to install and start:
+
+    yarn install
+    yarn start
+
+
+
+
 
 
 ## Features
