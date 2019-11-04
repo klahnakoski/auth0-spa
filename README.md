@@ -21,11 +21,10 @@ The `config.json` file has been set so you can use this SPA served from `http://
 
 * Maintains its own state through redirects
 * Shares Access Token among tabs
-* Handles multiple scenarios access token scenarios
-* Transfers session to API session once API is contacted
-
+* Handles multiple authentication scenarios
+* Trades Access Token for Session Token (as cookie) once API is contacted
 
 ## Code
 
 * `Home.jsx` - is responsible for the simple interface that shows the tokens, and allows you trigger events
-* `vendor/auth0/client.js` - is the main library. It is in a vendor as part of a larger suite of code to support multiple SPAs
+* `vendor/auth0/client.jsx` - is the main library. It is in a vendor as part of a larger suite of code to support multiple SPAs
