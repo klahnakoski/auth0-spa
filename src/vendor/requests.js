@@ -1,14 +1,17 @@
 /* global fetch */
 import { parse } from 'query-string';
-import {exists, isArray, isString, toArray, missing} from './utils';
+import {
+  exists, isArray, isString, missing, toArray,
+} from './utils';
 import { Data } from './datas';
 import { Duration } from './durations';
 import { GMTDate as Date } from './dates';
 import strings from './strings';
 import { Log } from './logs';
-import {leaves, selectFrom, toPairs} from './vectors';
+import { leaves, toPairs } from './vectors';
 import { KVStore } from './db_cache';
-import {sleep} from './signals';
+import { sleep } from './signals';
+import { json2value } from './convert';
 
 /*
 Parse a query string into an object. Leading ? or # are ignored, so you can
@@ -76,7 +79,15 @@ const jsonHeaders = {
   Accept: 'application/json',
 };
 const fetchJson = async (url, options = {}) => {
-  const { expire } = options;
+  const { expire, pleaseStop } = options;
+
+  let abortSignal;
+  if (exists(pleaseStop)) {
+    const controller = new AbortController();
+    pleaseStop.then(() => controller.abort());
+    abortSignal = controller.signal;
+  }
+
   const expires = missing(expire)
     ? null
     : Date.now().add(Duration.newInstance(expire));
@@ -87,9 +98,9 @@ const fetchJson = async (url, options = {}) => {
     (async () => {
       // Launch promise chain to fill cache with fresh data
       try {
-        await sleep(10000); // wait 10sec so others can make requests
+        await sleep(10); // wait 10sec so others can make requests
         Log.note('refesh cache for {{url}}', { url });
-        const response = await fetch(url, {...options, headers: {...options.headers, ...jsonHeaders}});
+        const response = await fetch(url, { ...options, signal: abortSignal, headers: { ...options.headers, ...jsonHeaders } });
 
         if (!response || !response.ok) {
           await requestCache.set(url, null);
@@ -109,34 +120,48 @@ const fetchJson = async (url, options = {}) => {
   }
 
   try {
-    const response = await fetch(url, {...options, headers: {...options.headers, ...jsonHeaders}});
+    const response = await fetch(
+      url,
+      {
+        ...options,
+        method: options.body ? 'POST' : 'GET',
+        signal: abortSignal,
+        headers: {
+          ...options.headers,
+          ...jsonHeaders,
+        },
+      },
+    );
 
     if (!response) {
       return null;
     }
 
-
     if (!response.ok) {
-      const details = await response.json();
-      Log.error('{{status}} when calling {{url}}: {{details|json}}', {
-        url,
-        status: response.status,
-        details
-    });
+      let cause = await response.text();
+      try {
+        cause = json2value(cause);
+      } catch (e) {
+        // do nothing
+      }
+      Log.error(
+        '{{status}} when calling {{url}}',
+        {
+          url,
+          status: response.status,
+        },
+        cause,
+      );
     }
 
     const content = await response.text();
-
-    response.headers.forEach((k,v)=>{
-      Log.note(k+"="+v);
-    });
-    Log.note("COOKIE: " + document.cookie);
 
     try {
       if (expire) {
         await requestCache.set(url, { url, content, expires });
       }
 
+      if (missing(content)) return null;
       return JSON.parse(content);
     } catch (error) {
       Log.error('Problem parsing {{text}}', { text: response.text() }, error);

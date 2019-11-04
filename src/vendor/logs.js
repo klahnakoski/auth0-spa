@@ -1,9 +1,9 @@
 /* eslint-disable max-len */
 
 import {
-  coalesce, exists, isString, missing,
+  coalesce, exists, isString, missing, isArray,
 } from './utils';
-import { Data } from './datas';
+import { Data, isData } from './datas';
 import { Template } from './Template';
 
 //   Error
@@ -24,6 +24,10 @@ const stackPatterns = [
 function parseStack(stackString) {
   if (missing(stackString)) {
     return [];
+  }
+
+  if (isArray(stackString)) {
+    return stackString; // ASSUME ALREADY PARSED
   }
 
   return stackString
@@ -81,6 +85,15 @@ class Exception extends Error {
 
   get trace() {
     return parseStack(this.stack).slice(this.stackOffset);
+  }
+
+  includes(find) {
+    /*
+    RETURN true IF find CAN BE FOND IN THE CAUSAL CHAIN OF THIS EXCEPTION
+     */
+    if (this.template === find) return true;
+    if (this.cause && this.cause.includes(find)) return true;
+    return Template.expand(this.template, this.props).includes(find);
   }
 
   toString() {
@@ -159,10 +172,17 @@ Exception.wrap = (err) => {
 
   const output = new Exception();
 
-  output.template = err.message;
-  output.props = null;
-  output.cause = null;
-  output.stack = err.stack;
+  if (err instanceof Error) {
+    output.template = err.message;
+    output.props = null;
+    output.cause = null;
+    output.stack = err.stack;
+  } else if (isData(err)) {
+    output.template = err.template;
+    output.props = err.params;
+    output.stack = err.trace;
+    output.cause = Exception.wrap(output.cause);
+  }
 
   return output;
 };
