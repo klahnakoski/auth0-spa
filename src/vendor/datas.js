@@ -53,7 +53,7 @@ function isEqual(a, b, done = []) {
 /*
 RETURN true IF value HAS NO KEYS
  */
-Data.isEmpty = (value) => {
+Data.isEmpty = value => {
   if (missing(value)) {
     return true;
   }
@@ -101,7 +101,7 @@ Data.copy = (from, to) => {
 /*
 deepcopy Data and Array-like objects
  */
-Data.deepCopy = (value) => {
+Data.deepCopy = value => {
   if (isData(value)) {
     const output = {};
 
@@ -118,12 +118,12 @@ Data.deepCopy = (value) => {
   return value;
 };
 
-/*
-Coalesce leaf values
-Recursive version of {...argN, ... , ...arg2, ...arg1, ...dest}
-notice the reverse-ordering
- */
 Data.setDefault = (dest, ...args) => {
+  /*
+  Coalesce leaf values
+  Recursive version of {...argN, ... , ...arg2, ...arg1, ...dest}
+  notice the reverse-ordering
+   */
   function setDefault(dest, source, path) {
     const output = dest;
 

@@ -3,7 +3,6 @@ import { fetchJson, URL } from './requests';
 import {
   array,
   coalesce,
-  delayedValue,
   exists,
   first,
   isArray,
@@ -17,6 +16,7 @@ import jx from './jx/expressions';
 import { Log } from './logs';
 import { ceiling } from './math';
 import { Data } from './datas';
+import { delayedValue } from './signals';
 
 const DEBUG = false;
 const MAX_CHUNK_SIZE = 40; // NUMBER OF SIGNATURES FROM PERFHERDER
@@ -256,7 +256,7 @@ function internalFetch(repo, todo) {
           activeFetch[repo] -= 1;
         }
 
-        todo.forEach((meta) => {
+        todo.forEach(meta => {
           dataCache[meta.signature].resolve({
             meta,
             data: data[meta.signature].map(row => ({
@@ -270,14 +270,14 @@ function internalFetch(repo, todo) {
   });
 }
 
-const getDataBySignature = async (metadatas) => {
+const getDataBySignature = async metadatas => {
   // SCHEDULE ANY MISSING SIGNATURES
   selectFrom(metadatas)
     .groupBy('repo')
     .forEach((sigs, repo) => {
       const todo = sigs.filter(({ signature }) => missing(dataCache[signature]));
 
-      todo.forEach((meta) => {
+      todo.forEach(meta => {
         dataCache[meta.signature] = delayedValue();
       });
       internalFetch(repo, todo);
@@ -290,7 +290,7 @@ const getDataBySignature = async (metadatas) => {
 return a list of {meta, data} objects, each representing
 a perfhereder signature that matches the given filter
  */
-const getData = async (condition) => {
+const getData = async condition => {
   const collated = extract(condition, ['push_timestamp', 'repo', 'framework']);
 
   const results = await Promise.all(collated
