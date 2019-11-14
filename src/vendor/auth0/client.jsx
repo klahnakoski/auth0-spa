@@ -49,11 +49,9 @@ class Auth0Client {
     if (!session) {
       Log.error('require session to call api');
     }
-    /* eslint-disable-next-line no-param-reassign */
-    options.credentials = 'include';
 
     try {
-      const response = await fetchJson(url, options);
+      const response = await fetchJson(url, { ...options, credentials: 'include' });
       this.last_used = now;
       return response;
     } catch (error) {
@@ -414,11 +412,17 @@ class Auth0Client {
   }
 
   async keepAlive() {
-    try {
-      return await this.fetchJson(this.api.keep_alive);
-    } catch (e) {
-      Log.warning('Lost session', e);
-      this.cache.clear();
+    /*
+    CALL THIS FUNCTION TO KEEP THE SESSION ALIVE
+     */
+    const cookie = this.getCookie();
+    if (cookie) {
+      try {
+        await this.fetchJson(this.api.keep_alive);
+      } catch (e) {
+        this.cache.clear();
+        Log.warning('Can not keep session alive using cookie {{cookie|json}}', { cookie }, e);
+      }
     }
   }
 
@@ -430,12 +434,8 @@ class Auth0Client {
       const now = Date.now().unix();
       const cookie = this.getCookie();
       if (cookie && now > this.last_used + cookie.inactive_lifetime - 120) {
-        try {
-          /* eslint-disable-next-line no-await-in-loop */
-          await this.keepAlive();
-        } catch (e) {
-          Log.warning('Can not keep session alive', e);
-        }
+        /* eslint-disable-next-line no-await-in-loop */
+        await this.keepAlive();
       }
       /* eslint-disable-next-line no-await-in-loop */
       await sleep(15);
@@ -447,11 +447,13 @@ class Auth0Client {
     INVALIDATE THE SESSION COOKIE
      */
     try {
+      if (!this.getCookie()) return;
       await this.fetchJson(this.api.logout);
     } catch (e) {
       Log.warning('problem calling logout endpoint', e);
+    } finally {
+      this.cache.clear();
     }
-    this.cache.clear();
   }
 }
 
@@ -479,7 +481,13 @@ async function newInstance({ onStateChange, ...options }) {
     `);
   }
 
-  const redirect_uri = options.redirect_uri || window.location.origin + window.location.pathname;
+  let redirect_uri = window.location.origin + window.location.pathname;
+  if (options.redirect_path) {
+    redirect_uri = window.location.origin + options.redirect_path;
+  } else if (options.redirect_uri) {
+    /* eslint-disable-next-line prefer-destructuring */
+    redirect_uri = options.redirect_uri;
+  }
   if (options.home_path) {
     const location = window.location.origin + options.home_path;
     if (redirect_uri !== location) {
@@ -539,11 +547,14 @@ class AuthProvider extends React.Component {
   }
 
   async update() {
+    const { cookie } = this.state;
     const authenticator = await Auth0Client.newInstance({ onStateChange: () => this.update(), ...SETTINGS.auth0 });
+    const newCookie = exists(authenticator.getCookie());
     this.setState({
       authenticator,
-      cookie: exists(authenticator.getCookie()),
+      cookie: newCookie,
     });
+    if (cookie !== newCookie) this.forceUpdate();
   }
 
   render() {
