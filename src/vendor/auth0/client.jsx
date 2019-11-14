@@ -418,10 +418,7 @@ class Auth0Client {
     const cookie = this.getCookie();
     if (cookie) {
       try {
-        await this.fetchJson(
-          this.api.keep_alive,
-          { headers: { Authorization: 'dummy value to make browser send cookie' } },
-        );
+        await this.fetchJson(this.api.keep_alive);
       } catch (e) {
         this.cache.clear();
         Log.warning('Can not keep session alive using cookie {{cookie|json}}', { cookie }, e);
@@ -451,10 +448,7 @@ class Auth0Client {
      */
     try {
       if (!this.getCookie()) return;
-      await this.fetchJson(
-        this.api.logout,
-        { headers: { Authorization: 'dummy value to make browser send cookie' } },
-      );
+      await this.fetchJson(this.api.logout);
     } catch (e) {
       Log.warning('problem calling logout endpoint', e);
     } finally {
