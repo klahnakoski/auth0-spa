@@ -14,7 +14,7 @@ import { Cache } from './cache';
 import { GMTDate as Date } from '../dates';
 import { Signal, sleep, Timer } from '../signals';
 import SETTINGS from '../../config.json';
-import { toPairs } from "../vectors";
+import { toPairs } from '../vectors';
 
 const DEFAULT_SCOPE = '';
 
