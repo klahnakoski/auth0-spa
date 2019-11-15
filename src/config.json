@@ -10,9 +10,6 @@
             "url": "https://github.com/klahnakoski/auth0-spa"
         },
         "api": {
-            "cookie": {
-                "name": "annotation_session"
-            },
             "domain": "dev.localhost",
             "login": "http://dev.localhost:5000/authorize",
             "logout": "http://dev.localhost:5000/logout",

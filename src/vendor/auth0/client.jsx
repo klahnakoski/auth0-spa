@@ -27,7 +27,6 @@ class Auth0Client {
     domain, leeway = 10, client_id, audience, scope, redirect_uri, onStateChange, api,
   }) {
     if (Auth0Client.CLIENT) Log.error('There can be only one');
-    if (!api.cookie.name) Log.error('Expecting a cookie.name parameter');
 
     Auth0Client.CLIENT = this;
     this.options = {
@@ -51,7 +50,14 @@ class Auth0Client {
     }
 
     try {
-      const response = await fetchJson(url, { ...options, credentials: 'include' });
+      const response = await fetchJson(
+          url,
+          {
+            ...options,
+            headers: {...options.headers, Authorization: session.session_id },
+            credentials: 'include'
+          }
+      );
       this.last_used = now;
       return response;
     } catch (error) {
@@ -84,31 +90,13 @@ class Auth0Client {
   }
 
   setCookie(cookie) {
-    const str = (v, k) => {
-      if (v === true) {
-        return k;
-      } if (v === false) {
-        return '';
-      }
-      return `${k}=${v}`;
-    };
-    const {
-      domain, path, secure, httponly, expires, name, value,
-    } = cookie;
-    const rest = {
-      domain, path, secure, httponly, expires,
-    };
-    const cookie_text = `${name}=${value};${
-      toPairs(rest).map(str).filter(exists).join(';')}`;
     this.cache.set({ cookie });
-    document.cookie = cookie_text;
   }
 
   clearCookie() {
     // Set-Cookie: annotation_session=7e092d6a-0783-4922-9456-7b306360898b; Domain=dev.localhost; Expires=Mon, 25-Nov-2019 12:49:05 GMT; Path=/
     const cookie = this.getCookie();
     if (cookie) {
-      document.cookie = `${cookie.name}=;path=${cookie.path};domain=${cookie.domain};expires=Thu, 01 Jan 1970 00:00:01 GMT`;
       this.cache.clear('cookie');
     }
   }
@@ -401,7 +389,7 @@ class Auth0Client {
     try {
       const api_cookie = await fetchJson(
         this.api.login,
-        { headers: { Authorization: `Bearer ${rawAccessToken}` } },
+        { headers: { Authorization: rawAccessToken} },
       );
 
       this.setCookie(api_cookie);
